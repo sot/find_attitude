@@ -11,7 +11,7 @@ logger = pyyaks.logger.get_logger(name='find_attidue', level=loglevel,
                                   format="%(asctime)s %(message)s")
 
 
-def get_dists_yag_zag(yags, zags):
+def get_dists_yag_zag(yags, zags, mags=None):
     if np.all(np.abs(yags) < 2.0):
         # Must be in degrees, convert to arcsec
         yags = yags * 3600.
@@ -29,8 +29,11 @@ def get_dists_yag_zag(yags, zags):
 
     dists = np.sqrt((yags[idx0] - yags[idx1]) ** 2 + (zags[idx0] - zags[idx1]) ** 2)
     dists = np.array(dists)
+    if mags is None:
+        mags = np.ones_like(dists)
 
-    return dists, idx0, idx1
+    return Table([dists, idx0, idx1, mags[idx0], mags[idx1]],
+                 names=['dists', 'idx0', 'idx1', 'mag0', 'mag1'])
 
 
 def get_triangles(G):
@@ -51,7 +54,10 @@ def get_triangles(G):
     return result
 
 
-def get_match_graph(star_idx0, star_idx1, star_dists, agasc_pairs, tolerance=2.0):
+def get_match_graph(stars, agasc_pairs, tolerance=2.0):
+    star_idx0 = stars['idx0']
+    star_idx1 = stars['idx1']
+    star_dists = stars['dists']
     print('Starting get_match_graph')
     gmatch = nx.Graph()
     aoks = []
@@ -81,11 +87,11 @@ def get_match_graph(star_idx0, star_idx1, star_dists, agasc_pairs, tolerance=2.0
     return gmatch
 
 
-def find_matching_agasc_ids(dists, idx0s, idx1s, agasc_pairs_file, g_dist_match=None):
+def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None):
     if g_dist_match is None:
         with tables.open_file(agasc_pairs_file, 'r') as h5:
             agasc_pairs = h5.root.data
-            g_dist_match = get_match_graph(idx0s, idx1s, dists, agasc_pairs)
+            g_dist_match = get_match_graph(stars, agasc_pairs)
 
     logger.info('Getting all triangles from match graph')
     match_tris = get_triangles(g_dist_match)
@@ -142,73 +148,11 @@ def find_matching_agasc_ids(dists, idx0s, idx1s, agasc_pairs_file, g_dist_match=
     return out, g_geom_match, g_dist_match
 
 
-def find_all_matching_agasc_ids(yags, zags, agasc_pairs_file, dist_match_graph=None):
-    dists, idx0s, idx1s = get_dists_yag_zag(yags, zags)
+def find_all_matching_agasc_ids(yags, zags, mags, agasc_pairs_file, dist_match_graph=None):
+    stars = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
-        dists, idx0s, idx1s, agasc_pairs_file, dist_match_graph)
+        stars, agasc_pairs_file, dist_match_graph)
     return agasc_id_star_maps
-
-
-def find_attitude_for_agasc_ids_old(yags, zags, agasc_id_star_map):
-    """
-    Find attitude for a given set of yags and zags and matching agasc_ids
-    """
-    global yagzag
-
-    from sherpa import ui
-    import agasc
-    from Quaternion import Quat
-    from Ska.quatutil import radec2yagzag
-
-    star_indices = agasc_id_star_map.values()
-    yags = yags[star_indices]
-    zags = zags[star_indices]
-    agasc_ids = agasc_id_star_map.keys()
-    agasc_stars = [agasc.get_star(agasc_id) for agasc_id in agasc_ids]
-
-    # NEED PMCORR versions!!!!
-    ras = [s['RA'] for s in agasc_stars]
-    decs = [s['DEC'] for s in agasc_stars]
-
-    qatt = Quat([ras[0], decs[0], 0.0])
-
-    def _yag_zag(dra, ddec, droll):
-        q = qatt * Quat([dra / 3600., ddec / 3600., droll])
-        yags, zags = radec2yagzag(ras, decs, q)
-        return yags * 3600, zags * 3600, q
-
-    def yag_zag(pars, x):
-        m_yags, m_zags, q = _yag_zag(*pars)
-        return np.concatenate([m_yags, m_zags])
-
-    y = np.concatenate([yags, zags])
-    ui.load_arrays(1, np.arange(len(y)), y)
-    ui.load_user_model(yag_zag, "yagzag")
-    ui.add_user_pars("yagzag", ["dra", "ddec", "droll"])
-    ui.set_model(yagzag)
-
-    m_yags, m_zags, att_fit = _yag_zag(0, 0, 0)
-
-    yagzag.dra = 0.0
-    yagzag.ddec = 0.0
-    yagzag.droll = 0.0
-
-
-    ui.freeze(yagzag.droll)
-    ui.fit()
-
-    ui.thaw(yagzag.droll)
-    ui.freeze(yagzag.dra)
-    ui.freeze(yagzag.ddec)
-    ui.fit()
-
-    ui.thaw(yagzag.dra)
-    ui.thaw(yagzag.ddec)
-    ui.fit()
-
-    m_yags, m_zags, att_fit = _yag_zag(yagzag.dra.val, yagzag.ddec.val, yagzag.droll.val)
-
-    return yags, zags, m_yags, m_zags, att_fit
 
 
 def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
@@ -246,7 +190,10 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
 
     m_yags, m_zags, att_fit = _yag_zag(0, 0, 0)
 
-    dists, idx0, idx1 = get_dists_yag_zag(yags, zags)
+    stars = get_dists_yag_zag(yags, zags)
+    dists = stars['dists']
+    idx0 = stars['idx0']
+    idx1 = stars['idx1']
     i = np.argmax(dists)
     m_ang = np.arctan2(m_zags[idx0[i]] - m_zags[idx1[i]], m_yags[idx0[i]] - m_yags[idx1[i]])
     s_ang = np.arctan2(zags[idx0[i]] - zags[idx1[i]], yags[idx0[i]] - yags[idx1[i]])

@@ -24,8 +24,9 @@ dec = np.random.uniform(-90, 90)
 roll = np.random.uniform(0, 360)
 
 stars = get_bright_stars(ra, dec, roll, sigma_1axis=0.5)
-stars['YAG'][2:4] = 0.0
-agasc_id_star_maps = find_all_matching_agasc_ids(stars['YAG'], stars['ZAG'], 'distances.h5')
+stars = get_bright_stars()
+agasc_id_star_maps = find_all_matching_agasc_ids(stars['YAG'], stars['ZAG'], stars['MAG_ACA'],
+                                                 'distances.h5')
 if len(agasc_id_star_maps) == 0:
     print('ARGH, failed to find a match')
 else:

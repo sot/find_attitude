@@ -3,7 +3,7 @@ from itertools import izip
 
 import tables
 import numpy as np
-from astropy.table import Table
+from astropy.table import Table, vstack
 from Chandra.Time import DateTime
 import healpy as hp
 from agasc import sphere_dist, get_star
@@ -17,36 +17,38 @@ if 'STAR_CACHE' not in globals():
     STAR_CACHE = {}
 
 
-def make_distances_h5():
-    agasc = get_microagasc()
-    dists, id0, id1 = get_all_dists(agasc)
-    make_h5_file(dists, id0, id1, 'distances.h5')
+def make_distances_h5(max_mag=10.5, outfile='distances.h5', microagasc_file='microagasc.fits'):
+    if os.path.exists(outfile):
+        raise IOError('{} already exists'.format(outfile))
+    agasc = get_microagasc(microagasc_file, max_mag=max_mag)
+    t = get_all_dists(agasc)
+    make_h5_file(t, outfile)
 
 
-def make_microagasc(max_mag=10.5):
+def make_microagasc(max_mag=10.5, outfile='microagasc.fits'):
     import tables
-    h5 = tables.openFile('/proj/sot/ska/data/agasc/miniagasc.h5')
-    print('Reading miniagasc ...')
-    mag_aca = h5.root.data.col('MAG_ACA')
-    ok = mag_aca < max_mag
-    mag_aca = mag_aca[ok]
-    ra = h5.root.data.col('RA')[ok]
-    ra_pm = h5.root.data.col('PM_RA')[ok]
-    dec = h5.root.data.col('DEC')[ok]
-    dec_pm = h5.root.data.col('PM_DEC')[ok]
-    agasc_id = h5.root.data.col('AGASC_ID')[ok]
-    print('   Done.')
-    h5.close()
+    with tables.open_file('/proj/sot/ska/data/agasc/miniagasc.h5') as h5:
+        print('Reading miniagasc ...')
+        mag_aca = h5.root.data.col('MAG_ACA')
+        ok = mag_aca < max_mag
+        mag_aca = mag_aca[ok]
+        ra = h5.root.data.col('RA')[ok]
+        ra_pm = h5.root.data.col('PM_RA')[ok]
+        dec = h5.root.data.col('DEC')[ok]
+        dec_pm = h5.root.data.col('PM_DEC')[ok]
+        agasc_id = h5.root.data.col('AGASC_ID')[ok]
+        print('   Done.')
 
     t = Table([agasc_id, ra, dec, ra_pm, dec_pm, mag_aca],
               names=['agasc_id', 'ra', 'dec', 'ra_pm', 'dec_pm', 'mag_aca'])
-    t.write('microagasc.fits', overwrite=True)
+    t.write(outfile, overwrite=True)
 
 
-def get_microagasc(filename='microagasc.fits', date=None):
+def get_microagasc(filename='microagasc.fits', date=None, max_mag=10.5):
     if not os.path.exists(filename):
         make_microagasc()
     t = Table.read(filename)
+    t = t[t['mag_aca'] < max_mag]
 
     # Compute the multiplicative factor to convert from the AGASC proper motion
     # field to degrees.  The AGASC PM is specified in milliarcsecs / year, so this
@@ -94,10 +96,15 @@ def _get_dists(s0, s1):
     dists = dists[ok] * 3600  # convert to arcsec here
     idx0 = idx0[ok]
     idx1 = idx1[ok]
+    dists = dists.astype(np.float32)
     id0 = s0['agasc_id'][idx0].astype(np.int32)
     id1 = s1['agasc_id'][idx1].astype(np.int32)
-    dists = dists.astype(np.float32)
-    return dists, id0, id1
+    mag0 = s0['mag_aca'][idx0].astype(np.float16)
+    mag1 = s1['mag_aca'][idx1].astype(np.float16)
+
+    out = Table([dists, id0, id1, mag0, mag1],
+                names=['dists', 'agasc_id0', 'agasc_id1', 'mag0', 'mag1'])
+    return out
 
 
 def get_dists_for_region(agasc, ipix):
@@ -105,55 +112,38 @@ def get_dists_for_region(agasc, ipix):
     ipix_neighbors = hp.get_all_neighbours(NSIDE, ipix)
     s1s = [get_stars_for_region(agasc, ipix_neighbor) for ipix_neighbor in ipix_neighbors]
 
-    dists_list = []
-    id0_list = []
-    id1_list = []
+    t_list = []
     for s1 in [s0] + s1s:
-        dists, id0, id1 = _get_dists(s0, s1)
-        dists_list.append(dists)
-        id0_list.append(id0)
-        id1_list.append(id1)
-    dists = np.concatenate(dists_list)
-    id0 = np.concatenate(id0_list)
-    id1 = np.concatenate(id1_list)
-    return dists, id0, id1
+        t_list.append(_get_dists(s0, s1))
+    out = vstack(t_list)
+    return out
 
 
-def make_h5_file(dists, id0, id1, filename='distances.h5'):
+def make_h5_file(t, filename='distances.h5'):
     """Make a new h5 table to hold column from ``dat``."""
     filters = tables.Filters(complevel=5, complib='zlib')
-    t = Table([dists, id0, id1], names=['dists', 'agasc_id0', 'agasc_id1'])
     dat = np.array(t)
-    h5 = tables.openFile(filename, mode='a', filters=filters)
-    h5.createTable(h5.root, "data", dat, "Data table", expectedrows=len(dat))
-    h5.root.data.flush()
-    h5.close()
+    with tables.openFile(filename, mode='a', filters=filters) as h5:
+        h5.createTable(h5.root, "data", dat, "Data table", expectedrows=len(dat))
+        h5.root.data.flush()
 
-    h5 = tables.openFile(filename, mode='a', filters=filters)
-    print('Creating index')
-    h5.root.data.cols.dists.create_index()
-    h5.flush()
-    h5.close()
+    with tables.openFile(filename, mode='a', filters=filters) as h5:
+        print('Creating index')
+        h5.root.data.cols.dists.create_index()
+        h5.flush()
 
 
 def get_all_dists(agasc=None):
     if agasc is None:
         agasc = get_microagasc()
-    outs = []
+    t_list = []
     for ipix in xrange(hp.nside2npix(NSIDE)):
         print(ipix)
-        outs.append(get_dists_for_region(agasc, ipix))
-    dists, id0, id1 = zip(*outs)
+        t_list.append(get_dists_for_region(agasc, ipix))
 
-    dists = np.concatenate(dists)
-    id0 = np.concatenate(id0)
-    id1 = np.concatenate(id1)
-
-    index = np.argsort(dists)
-    dists = dists[index]
-    id0 = id0[index]
-    id1 = id1[index]
-    return dists, id0, id1
+    out = vstack(t_list)
+    out.sort('dists')
+    return out
 
 
 def plot_stars_and_neighbors(agasc, ipix):
