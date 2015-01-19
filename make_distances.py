@@ -85,10 +85,9 @@ def _get_dists(s0, s1):
     idx0 = idx0.ravel()
     idx1 = idx1.ravel()
 
-    if s0 is s1:
-        ok = idx0 > idx1
-        idx0 = idx0[ok]
-        idx1 = idx1[ok]
+    ok = s0['agasc_id'][idx0] < s1['agasc_id'][idx1]
+    idx0 = idx0[ok]
+    idx1 = idx1[ok]
 
     dists = sphere_dist(s0['ra'][idx0], s0['dec'][idx0],
                         s1['ra'][idx1], s1['dec'][idx1])
