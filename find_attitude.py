@@ -6,6 +6,8 @@ import networkx as nx
 import tables
 import pyyaks.logger
 
+DELTA_MAG = 1.0  # Accept matches where candidate star is within DELTA_MAG of observed
+
 loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attidue', level=loglevel,
                                   format="%(asctime)s %(message)s")
@@ -54,33 +56,44 @@ def get_triangles(G):
     return result
 
 
-def get_match_graph(stars, agasc_pairs, tolerance=2.0):
-    star_idx0 = stars['idx0']
-    star_idx1 = stars['idx1']
-    star_dists = stars['dists']
+def get_match_graph(aca_stars, agasc_pairs, tolerance=2.0):
+    idx0s = aca_stars['idx0']
+    idx1s = aca_stars['idx1']
+    dists = aca_stars['dists']
+    mag0s = aca_stars['mag0']
+    mag1s = aca_stars['mag1']
     print('Starting get_match_graph')
     gmatch = nx.Graph()
-    aoks = []
-    for i0, i1, dist in izip(star_idx0, star_idx1, star_dists):
+    ap_list = []
+    for i0, i1, dist, mag0, mag1 in izip(idx0s, idx1s, dists, mag0s, mag1s):
         logger.info('Getting matches from file {} {} {}'.format(i0, i1, dist))
-        aok = agasc_pairs.read_where('(dists > {}) & (dists < {})'
-                                     .format(dist - tolerance, dist + tolerance))
-        aok = Table([aok['dists'], aok['agasc_id0'], aok['agasc_id1'],
-                     i0 * np.ones(len(aok), dtype=np.uint8),
-                     i1 * np.ones(len(aok), dtype=np.uint8)],
-                    names=['dists', 'agasc_id0', 'agasc_id1', 'i0', 'i1'])
-        aoks.append(aok)
-        logger.info('  Found {} matching pairs'.format(len(aok)))
+        ap = agasc_pairs.read_where('(dists > {}) & (dists < {})'
+                                    .format(dist - tolerance, dist + tolerance))
+        # max_mag = max(mag0, mag1) + DELTA_MAG / 10.
+        DELTA_MAG = 1  # Accept matches where candidate star is within DELTA_MAG of observed
+        mag_ok = (ap['mag0'] < mag0 + DELTA_MAG) & (ap['mag1'] < mag1 + DELTA_MAG)
+        mag_ok[:] = True
+        is_123 = (ap['agasc_id0'] == 1230124896) | (ap['agasc_id1'] == 1230124896)
+        # mag_ok = (ap['mag0'] < max_mag) & (ap['mag1'] < max_mag)
+        if np.sum(is_123) > 0:
+            print('ap[is_123]', ap[is_123])
+            print('2 ap[is_123]', ap[is_123 & mag_ok])
+        ones = np.ones(np.sum(mag_ok), dtype=np.uint8)
+        ap = Table([ap['dists'][mag_ok], ap['agasc_id0'][mag_ok], ap['agasc_id1'][mag_ok],
+                    i0 * ones, i1 * ones],
+                   names=['dists', 'agasc_id0', 'agasc_id1', 'i0', 'i1'])
+        ap_list.append(ap)
+        logger.info('  Found {} matching pairs'.format(len(ap)))
 
-    aok = vstack(aoks)
+    ap = vstack(ap_list)
 
-    agasc_id0 = aok['agasc_id0']
-    agasc_id1 = aok['agasc_id1']
-    i0 = aok['i0']
-    i1 = aok['i1']
-    dists = aok['dists']
+    agasc_id0 = ap['agasc_id0']
+    agasc_id1 = ap['agasc_id1']
+    i0 = ap['i0']
+    i1 = ap['i1']
+    dists = ap['dists']
 
-    for i in xrange(len(aok)):
+    for i in xrange(len(ap)):
         gmatch.add_edge(agasc_id0[i], agasc_id1[i], i0=i0[i], i1=i1[i], dist=dists[i])
     logger.info('Added edges with {} nodes'.format(len(gmatch)))
 
@@ -135,10 +148,13 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None):
 
         agasc_id_star_index_map = {}
         for agasc_id, count_dict in node_star_index_count.items():
+            logger.info('AGASC ID {} has counts {}'.format(agasc_id, count_dict))
             for index, count in count_dict.items():
                 if count == n_clique_nodes - 1:
                     agasc_id_star_index_map[agasc_id] = index
                     break
+            else:
+                logger.info('  **** AGASC ID {} is incomplete **** '.format(agasc_id))
         if len(agasc_id_star_index_map) >= 4:
             out.append(agasc_id_star_index_map)
         else:
@@ -152,7 +168,7 @@ def find_all_matching_agasc_ids(yags, zags, mags, agasc_pairs_file, dist_match_g
     stars = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
         stars, agasc_pairs_file, dist_match_graph)
-    return agasc_id_star_maps
+    return agasc_id_star_maps, g_geom_match, g_dist_match
 
 
 def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
@@ -173,9 +189,8 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     agasc_ids = agasc_id_star_map.keys()
     agasc_stars = [agasc.get_star(agasc_id) for agasc_id in agasc_ids]
 
-    # NEED PMCORR versions!!!!
-    ras = [s['RA'] for s in agasc_stars]
-    decs = [s['DEC'] for s in agasc_stars]
+    ras = [s['RA_PMCORR'] for s in agasc_stars]
+    decs = [s['DEC_PMCORR'] for s in agasc_stars]
 
     qatt = Quat([ras[0], decs[0], 0.0])
 
@@ -197,7 +212,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     i = np.argmax(dists)
     m_ang = np.arctan2(m_zags[idx0[i]] - m_zags[idx1[i]], m_yags[idx0[i]] - m_yags[idx1[i]])
     s_ang = np.arctan2(zags[idx0[i]] - zags[idx1[i]], yags[idx0[i]] - yags[idx1[i]])
-    roll = np.degrees(s_ang - m_ang)
+    roll = np.degrees(m_ang - s_ang)
 
     y = np.concatenate([yags, zags])
     ui.load_arrays(1, np.arange(len(y)), y)
