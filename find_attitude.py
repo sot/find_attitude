@@ -89,7 +89,16 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     dists = ap['dists']
 
     for i in xrange(len(ap)):
-        gmatch.add_edge(agasc_id0[i], agasc_id1[i], i0=i0[i], i1=i1[i], dist=dists[i])
+        id0 = agasc_id0[i]
+        id1 = agasc_id1[i]
+        edge_data = gmatch.get_edge_data(id0, id1, None)
+        if edge_data is None:
+            gmatch.add_edge(id0, id1, i0=[i0[i]], i1=[i1[i]], dist=dists[i])
+        else:
+            edge = gmatch[id0][id1]
+            edge['i0'].append(i0[i])
+            edge['i1'].append(i1[i])
+
     logger.info('Added edges with {} nodes'.format(len(gmatch)))
 
     return gmatch
@@ -108,19 +117,26 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
     g_geom_match = nx.Graph()
     logger.info('Finding triangles that match stars pattern')
     for tri in match_tris:
-        index_set = set()
-        nodes_list = []
-        edge_data_list = []
-        for i0, i1 in ((0, 1), (0, 2), (1, 2)):
-            nodes = tri[i0], tri[i1]
-            edge_data = g_dist_match.get_edge_data(*nodes)
-            index_set.add(edge_data['i0'])
-            index_set.add(edge_data['i1'])
-            edge_data_list.append(edge_data)
-            nodes_list.append(nodes)
-        if len(index_set) == 3:
-            for nodes, edge_data in izip(nodes_list, edge_data_list):
-                g_geom_match.add_edge(*nodes, **edge_data)
+        e0 = g_dist_match.get_edge_data(tri[0], tri[1])
+        e1 = g_dist_match.get_edge_data(tri[0], tri[2])
+        e2 = g_dist_match.get_edge_data(tri[1], tri[2])
+        match_count = 0
+        for e0_i0 in e0['i0']:
+            for e0_i1 in e0['i1']:
+                for e1_i0 in e1['i0']:
+                    for e1_i1 in e1['i1']:
+                        for e2_i0 in e2['i0']:
+                            for e2_i1 in e2['i1']:
+                                if tri[0] == 1230121648:
+                                    print [e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1], set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])
+                                if len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])) == 3:
+                                    g_geom_match.add_edge(tri[0], tri[1], i0=e0_i0, i1=e0_i1, dist=e0['dist'])
+                                    g_geom_match.add_edge(tri[0], tri[2], i0=e1_i0, i1=e1_i1, dist=e1['dist'])
+                                    g_geom_match.add_edge(tri[0], tri[1], i0=e2_i0, i1=e2_i1, dist=e2['dist'])
+                                    match_count += 1
+        if match_count > 1:
+            logger.info('** WARNING ** matched multiple plausible triangles for {} {} {}'
+                         .format(*tri))
 
     out = []
 
@@ -136,12 +152,12 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
         # Make sure that each node is uniquely associated with the corresponding
         # star catalog entry.
         node_star_index_count = collections.defaultdict(collections.Counter)
-        for node0, node1 in nx.edges(g_geom_match, clique_nodes):
+        for node0, node1 in nx.edges(g_dist_match, clique_nodes):
             if node0 in clique_nodes and node1 in clique_nodes:
                 edge_data = g_dist_match.get_edge_data(node0, node1)
                 for node in (node0, node1):
                     for edge_i in [edge_data['i0'], edge_data['i1']]:
-                        node_star_index_count[node].update([edge_i])
+                        node_star_index_count[node].update(edge_i)
 
         agasc_id_star_index_map = {}
         for agasc_id, count_dict in node_star_index_count.items():
