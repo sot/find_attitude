@@ -1,3 +1,5 @@
+from __future__ import print_function, division
+
 import numpy as np
 import agasc
 from Ska.quatutil import radec2yagzag
@@ -28,10 +30,47 @@ def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
     return stars
 
 
-def test_random():
+def find_overlapping_distances(min_n_overlap=2, tolerance=2.0):
+    while True:
+        ra = np.random.uniform(0, 360)
+        dec = np.random.uniform(-90, 90)
+        roll = np.random.uniform(0, 360)
+        print(ra, dec, roll)
+        stars = get_stars(ra, dec, roll, sigma_1axis=0.001, sigma_mag=0.2)
+        dist_table = get_dists_yag_zag(stars['YAG'], stars['ZAG'])
+        dists = dist_table['dists']
+        n_dists = len(dists)
+
+        n_overlap = 0
+        for i, d0 in enumerate(dists):
+            for d1 in dists[i + 1:]:
+                if np.abs(d0 - d1) < tolerance:
+                    n_overlap += 1
+        if n_overlap >= min_n_overlap:
+            return ra, dec, roll, stars, dists
+
+
+def test_overlapping_distances():
+    """
+    Test a case where distance 5-7 = 864.35 and 5-1 is 865.808
+    """
+    global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
+    ra, dec, roll = (176.21566235300048, -36.4011650737424, 253.92152697511588)
+    stars = get_stars(ra, dec, roll, sigma_1axis=0.004, sigma_mag=0.2, brightest=True)
+    agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
+        stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5', tolerance=1.0)
+    check_output(agasc_id_star_maps, stars, ra, dec, roll)
+
+
+def test_random(brightest=True):
+    global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
     ra = np.random.uniform(0, 360)
     dec = np.random.uniform(-90, 90)
     roll = np.random.uniform(0, 360)
+    stars = get_stars(ra, dec, roll, sigma_1axis=0.004, sigma_mag=0.2, brightest=brightest)
+    agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
+        stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5')
+    check_output(agasc_id_star_maps, stars, ra, dec, roll)
 
 
 def check_output(agasc_id_star_maps, stars, ra, dec, roll):
@@ -45,7 +84,7 @@ def check_output(agasc_id_star_maps, stars, ra, dec, roll):
     assert len(agasc_id_star_maps) == 1
 
 
-if __name__ == '__main__':
+if __name__ == '   __main__':
     ra, dec, roll = 115.770455413, -77.6580358662, 86.4089128685
     stars = get_stars(ra, dec, roll, sigma_1axis=0.0005, sigma_mag=0.0001)
     if False:
@@ -54,6 +93,6 @@ if __name__ == '__main__':
         dec=-78
         roll=0
     agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
-        stars['YAG'], stars['ZAG'], stars['MAG_ACA'] - 1, 'distances-8.5mag.h5')
+        stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances-8.5mag.h5')
         # stars['YAG'], stars['ZAG'], stars['MAG_ACA'] - 1, 'distances.h5')
     check_output(agasc_id_star_maps, stars, ra, dec, roll)
