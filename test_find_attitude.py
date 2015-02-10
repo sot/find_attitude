@@ -58,21 +58,22 @@ def test_overlapping_distances(tolerance=3.0):
     ra, dec, roll = (176.21566235300048, -36.4011650737424, 253.92152697511588) # 2 overlaps, 2.0 tol
     ra, dec, roll = (131.1371559426714, 65.25369723989581, 112.4351393383257)  # 3 overlaps, 3.0 tol
     stars = get_stars(ra, dec, roll, sigma_1axis=0.004, sigma_mag=0.2, brightest=True)
-    stars = stars[[0, 1, 2, 5, 6]]
+    # stars = stars[[0, 1, 2, 6]]
     agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
         stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5', tolerance=tolerance)
     check_output(agasc_id_star_maps, stars, ra, dec, roll)
 
 
-def test_random(brightest=True):
-    global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
-    ra = np.random.uniform(0, 360)
-    dec = np.random.uniform(-90, 90)
-    roll = np.random.uniform(0, 360)
-    stars = get_stars(ra, dec, roll, sigma_1axis=0.004, sigma_mag=0.2, brightest=brightest)
-    agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
-        stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5')
-    check_output(agasc_id_star_maps, stars, ra, dec, roll)
+def test_random(n_iter=1, brightest=True):
+    for _ in xrange(n_iter):
+        global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
+        ra = np.random.uniform(0, 360)
+        dec = np.random.uniform(-90, 90)
+        roll = np.random.uniform(0, 360)
+        stars = get_stars(ra, dec, roll, sigma_1axis=0.4, sigma_mag=0.2, brightest=brightest)
+        agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
+            stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5')
+        check_output(agasc_id_star_maps, stars, ra, dec, roll)
 
 
 def check_output(agasc_id_star_maps, stars, ra, dec, roll):
@@ -83,6 +84,13 @@ def check_output(agasc_id_star_maps, stars, ra, dec, roll):
         print('Solve: RA Dec Roll = {} {} {}'.format(*att_fit.equatorial))
         print('Delta distances {}'.format(np.sqrt((yags - m_yags) ** 2
                                                   + (zags - m_zags) ** 2)))
+        att_in = Quat([ra, dec, roll])
+        d_att = att_in.inv() * att_fit
+        d_roll, d_pitch, d_yaw, _ = 2 * np.degrees(d_att.q) * 3600.
+        assert d_roll < 20.
+        assert d_pitch < 1.
+        assert d_yaw < 1.
+
     assert len(agasc_id_star_maps) == 1
 
 

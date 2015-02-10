@@ -1,12 +1,13 @@
 import collections
-from itertools import izip
+from itertools import izip, product
 import numpy as np
 from astropy.table import Table, vstack
 import networkx as nx
 import tables
 import pyyaks.logger
 
-TEST_OVERLAPPING = True
+DEBUG = False
+TEST_OVERLAPPING = False
 DELTA_MAG = None  # Accept matches where candidate star is within DELTA_MAG of observed
 
 loglevel = pyyaks.logger.INFO
@@ -61,7 +62,6 @@ def add_edge(graph, id0, id1, i0, i1, dist):
     edge_data = graph.get_edge_data(id0, id1, None)
     if edge_data is None:
         graph.add_edge(id0, id1, i0=[i0], i1=[i1], dist=dist)
-        # print('Adding new edge {} {} {} {} {}'.format(id0, id1, i0, i1, dist))
     else:
         edge = graph[id0][id1]
         snew = set([i0, i1])
@@ -71,7 +71,6 @@ def add_edge(graph, id0, id1, i0, i1, dist):
                 return
         edge['i0'].append(i0)
         edge['i1'].append(i1)
-        # print('Appending edge {} {} {} {} {} {}'.format(id0, id1, i0, i1, dist, edge['dist']))
 
 
 def get_match_graph(aca_stars, agasc_pairs, tolerance):
@@ -83,8 +82,9 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     print('Starting get_match_graph')
     gmatch = nx.Graph()
     ap_list = []
+    logger.info('Getting matches from file')
     for i0, i1, dist, mag0, mag1 in izip(idx0s, idx1s, dists, mag0s, mag1s):
-        logger.info('Getting matches from file {} {} {}'.format(i0, i1, dist))
+        logger.verbose('Getting matches from file {} {} {}'.format(i0, i1, dist))
         ap = agasc_pairs.read_where('(dists > {}) & (dists < {})'
                                     .format(dist - tolerance, dist + tolerance))
         # max_mag = max(mag0, mag1) + DELTA_MAG / 10.
@@ -96,7 +96,7 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
         ap = Table([ap['dists'], ap['agasc_id0'], ap['agasc_id1'], i0 * ones, i1 * ones],
                    names=['dists', 'agasc_id0', 'agasc_id1', 'i0', 'i1'])
         ap_list.append(ap)
-        logger.info('  Found {} matching pairs'.format(len(ap)))
+        logger.verbose('  Found {} matching pairs'.format(len(ap)))
 
     ap = vstack(ap_list)
 
@@ -113,29 +113,72 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     i1 = ap['i1']
     dists = ap['dists']
 
+    logger.info('Adding {} edges'.format(len(ap)))
+
     for i in xrange(len(ap)):
         id0 = agasc_id0[i]
         id1 = agasc_id1[i]
 
         add_edge(gmatch, id0, id1, i0[i], i1[i], dists[i])
 
-    logger.info('Added edges with {} nodes'.format(len(gmatch)))
-
     if TEST_OVERLAPPING:
         match_tris = get_triangles(gmatch)
-        print('Matching triangles')
+        logger.info('Matching triangles')
         for tri in match_tris:
             e0 = gmatch.get_edge_data(tri[0], tri[1])
             e1 = gmatch.get_edge_data(tri[0], tri[2])
             e2 = gmatch.get_edge_data(tri[1], tri[2])
-            print(tri[0], tri[1], tri[2], e0, e1, e2)
+            logger.info(tri[0], tri[1], tri[2], e0, e1, e2)
 
-        print('Edge data')
+        logger.info('Edge data')
         for n0, n1 in nx.edges(gmatch):
             ed = gmatch.get_edge_data(n0, n1)
             print(n0, n1, ed)
 
     return gmatch
+
+
+def get_slot_id_candidates(graph, nodes):
+    class BadCandidateError(Exception):
+        pass
+
+    n_nodes = len(nodes)
+    i0_id0s_list = []
+    i1_id1s_list = []
+    for node0, node1 in nx.edges(graph, nodes):
+        if node0 in nodes and node1 in nodes:
+            edge_data = graph.get_edge_data(node0, node1)
+            i0_id0s_list.append([(i0, node0) for i0 in edge_data['i0']])
+            i1_id1s_list.append([(i1, node1) for i1 in edge_data['i1']])
+
+    id_candidates = []
+    for i0_id0s, i1_id1s in izip(product(*i0_id0s_list), product(*i1_id1s_list)):
+        logger.info('')
+        node_star_index_count = collections.defaultdict(collections.Counter)
+        for i0_id0, i1_id1 in izip(i0_id0s, i1_id1s):
+            i0, id0 = i0_id0
+            i1, id1 = i1_id1
+            for i in i0, i1:
+                for id_ in id0, id1:
+                    node_star_index_count[id_].update([i])
+
+        try:
+            agasc_id_star_index_map = {}
+            for agasc_id, count_dict in node_star_index_count.items():
+                logger.verbose('AGASC ID {} has counts {}'.format(agasc_id, count_dict))
+                for index, count in count_dict.items():
+                    if count == n_nodes - 1:
+                        agasc_id_star_index_map[agasc_id] = index
+                        break
+                else:
+                    logger.verbose('  **** AGASC ID {} is incomplete **** '.format(agasc_id))
+                    raise BadCandidateError
+        except BadCandidateError:
+            pass
+        else:
+            id_candidates.append(agasc_id_star_index_map)
+
+    return id_candidates
 
 
 def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.0):
@@ -162,20 +205,19 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
                 for e2_i, e2_i0 in enumerate(e2['i0']):
                     e2_i1 = e2['i1'][e2_i]
                     if len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])) == 3:
-                        # print([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1], len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])))
-
                         add_edge(g_geom_match, tri[0], tri[1], e0_i0, e0_i1, e0['dist'])
                         add_edge(g_geom_match, tri[0], tri[2], e1_i0, e1_i1, e1['dist'])
                         add_edge(g_geom_match, tri[2], tri[1], e2_i0, e2_i1, e2['dist'])
                         match_count += 1
-        if match_count > 1:
-            logger.info('** NOTE ** matched multiple plausible triangles for {} {} {}'
-                         .format(*tri))
+        # if match_count > 1:
+        #     logger.info('** NOTE ** matched multiple plausible triangles for {} {} {}'
+        #                 .format(*tri))
 
-    print('g_geom_match: ')
-    for n0, n1 in nx.edges(g_geom_match):
-        ed = g_geom_match.get_edge_data(n0, n1)
-        print(n0, n1, ed)
+    if DEBUG:
+        print('g_geom_match: ')
+        for n0, n1 in nx.edges(g_geom_match):
+            ed = g_geom_match.get_edge_data(n0, n1)
+            print(n0, n1, ed)
 
     out = []
 
@@ -188,31 +230,9 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
 
         logger.info('Checking clique {}'.format(clique_nodes))
 
-        # Make sure that each node is uniquely associated with the corresponding
-        # star catalog entry.
-        node_star_index_count = collections.defaultdict(collections.Counter)
-        for node0, node1 in nx.edges(g_dist_match, clique_nodes):
-            if node0 in clique_nodes and node1 in clique_nodes:
-                edge_data = g_dist_match.get_edge_data(node0, node1)
-                for node in (node0, node1):
-                    for edge_i in [edge_data['i0'], edge_data['i1']]:
-                        node_star_index_count[node].update(edge_i)
+        out.extend(get_slot_id_candidates(g_geom_match, clique_nodes))
 
-        agasc_id_star_index_map = {}
-        for agasc_id, count_dict in node_star_index_count.items():
-            logger.info('AGASC ID {} has counts {}'.format(agasc_id, count_dict))
-            for index, count in count_dict.items():
-                if count == n_clique_nodes - 1:
-                    agasc_id_star_index_map[agasc_id] = index
-                    break
-            else:
-                logger.info('  **** AGASC ID {} is incomplete **** '.format(agasc_id))
-        if len(agasc_id_star_index_map) >= 4:
-            out.append(agasc_id_star_index_map)
-        else:
-            logger.info('Failed clique: {} {}'.format(clique_nodes, node_star_index_count))
-
-    logger.info('Done')
+    logger.info('Done with graph matching')
     return out, g_geom_match, g_dist_match
 
 
