@@ -6,7 +6,7 @@ import networkx as nx
 import tables
 import pyyaks.logger
 
-DELTA_MAG = 1.0  # Accept matches where candidate star is within DELTA_MAG of observed
+DELTA_MAG = None  # Accept matches where candidate star is within DELTA_MAG of observed
 
 loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attidue', level=loglevel,
@@ -56,7 +56,7 @@ def get_triangles(G):
     return result
 
 
-def get_match_graph(aca_stars, agasc_pairs, tolerance=2.0):
+def get_match_graph(aca_stars, agasc_pairs, tolerance):
     idx0s = aca_stars['idx0']
     idx1s = aca_stars['idx1']
     dists = aca_stars['dists']
@@ -70,17 +70,12 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance=2.0):
         ap = agasc_pairs.read_where('(dists > {}) & (dists < {})'
                                     .format(dist - tolerance, dist + tolerance))
         # max_mag = max(mag0, mag1) + DELTA_MAG / 10.
-        DELTA_MAG = 1  # Accept matches where candidate star is within DELTA_MAG of observed
-        mag_ok = (ap['mag0'] < mag0 + DELTA_MAG) & (ap['mag1'] < mag1 + DELTA_MAG)
-        mag_ok[:] = True
-        is_123 = (ap['agasc_id0'] == 1230124896) | (ap['agasc_id1'] == 1230124896)
-        # mag_ok = (ap['mag0'] < max_mag) & (ap['mag1'] < max_mag)
-        if np.sum(is_123) > 0:
-            print('ap[is_123]', ap[is_123])
-            print('2 ap[is_123]', ap[is_123 & mag_ok])
-        ones = np.ones(np.sum(mag_ok), dtype=np.uint8)
-        ap = Table([ap['dists'][mag_ok], ap['agasc_id0'][mag_ok], ap['agasc_id1'][mag_ok],
-                    i0 * ones, i1 * ones],
+        if DELTA_MAG is not None:
+            mag_ok = (ap['mag0'] < mag0 + DELTA_MAG) & (ap['mag1'] < mag1 + DELTA_MAG)
+            ap = ap[mag_ok]
+
+        ones = np.ones(len(ap), dtype=np.uint8)
+        ap = Table([ap['dists'], ap['agasc_id0'], ap['agasc_id1'], i0 * ones, i1 * ones],
                    names=['dists', 'agasc_id0', 'agasc_id1', 'i0', 'i1'])
         ap_list.append(ap)
         logger.info('  Found {} matching pairs'.format(len(ap)))
@@ -100,11 +95,11 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance=2.0):
     return gmatch
 
 
-def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None):
+def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.0):
     if g_dist_match is None:
         with tables.open_file(agasc_pairs_file, 'r') as h5:
             agasc_pairs = h5.root.data
-            g_dist_match = get_match_graph(stars, agasc_pairs)
+            g_dist_match = get_match_graph(stars, agasc_pairs, tolerance)
 
     logger.info('Getting all triangles from match graph')
     match_tris = get_triangles(g_dist_match)
@@ -136,6 +131,8 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None):
         if n_clique_nodes < 4:
             continue
 
+        logger.info('Checking clique {}'.format(clique_nodes))
+
         # Make sure that each node is uniquely associated with the corresponding
         # star catalog entry.
         node_star_index_count = collections.defaultdict(collections.Counter)
@@ -164,10 +161,11 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None):
     return out, g_geom_match, g_dist_match
 
 
-def find_all_matching_agasc_ids(yags, zags, mags, agasc_pairs_file, dist_match_graph=None):
+def find_all_matching_agasc_ids(yags, zags, mags, agasc_pairs_file, dist_match_graph=None,
+                                tolerance=2.0):
     stars = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
-        stars, agasc_pairs_file, dist_match_graph)
+        stars, agasc_pairs_file, dist_match_graph, tolerance=tolerance)
     return agasc_id_star_maps, g_geom_match, g_dist_match
 
 
