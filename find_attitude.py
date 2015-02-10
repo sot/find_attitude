@@ -8,7 +8,7 @@ import pyyaks.logger
 
 DEBUG = False
 TEST_OVERLAPPING = False
-DELTA_MAG = None  # Accept matches where candidate star is within DELTA_MAG of observed
+DELTA_MAG = 1.0  # Accept matches where candidate star is within DELTA_MAG of observed
 
 loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attidue', level=loglevel,
@@ -34,7 +34,7 @@ def get_dists_yag_zag(yags, zags, mags=None):
     dists = np.sqrt((yags[idx0] - yags[idx1]) ** 2 + (zags[idx0] - zags[idx1]) ** 2)
     dists = np.array(dists)
     if mags is None:
-        mags = np.ones_like(dists)
+        mags = np.ones_like(dists) * 15
 
     return Table([dists, idx0, idx1, mags[idx0], mags[idx1]],
                  names=['dists', 'idx0', 'idx1', 'mag0', 'mag1'])
@@ -89,7 +89,8 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
                                     .format(dist - tolerance, dist + tolerance))
         # max_mag = max(mag0, mag1) + DELTA_MAG / 10.
         if DELTA_MAG is not None:
-            mag_ok = (ap['mag0'] < mag0 + DELTA_MAG) & (ap['mag1'] < mag1 + DELTA_MAG)
+            max_mag = max(mag0, mag1) + DELTA_MAG
+            mag_ok = (ap['mag0'] < max_mag) & (ap['mag1'] < max_mag)
             ap = ap[mag_ok]
 
         ones = np.ones(len(ap), dtype=np.uint8)
@@ -181,7 +182,7 @@ def get_slot_id_candidates(graph, nodes):
     return id_candidates
 
 
-def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.0):
+def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5):
     if g_dist_match is None:
         with tables.open_file(agasc_pairs_file, 'r') as h5:
             agasc_pairs = h5.root.data
@@ -236,7 +237,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
     return out, g_geom_match, g_dist_match
 
 
-def find_all_matching_agasc_ids(yags, zags, mags, agasc_pairs_file, dist_match_graph=None,
+def find_all_matching_agasc_ids(yags, zags, mags=None, agasc_pairs_file=None, dist_match_graph=None,
                                 tolerance=2.0):
     stars = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
