@@ -6,6 +6,7 @@ import networkx as nx
 import tables
 import pyyaks.logger
 
+TEST_OVERLAPPING = True
 DELTA_MAG = None  # Accept matches where candidate star is within DELTA_MAG of observed
 
 loglevel = pyyaks.logger.INFO
@@ -56,6 +57,23 @@ def get_triangles(G):
     return result
 
 
+def add_edge(graph, id0, id1, i0, i1, dist):
+    edge_data = graph.get_edge_data(id0, id1, None)
+    if edge_data is None:
+        graph.add_edge(id0, id1, i0=[i0], i1=[i1], dist=dist)
+        # print('Adding new edge {} {} {} {} {}'.format(id0, id1, i0, i1, dist))
+    else:
+        edge = graph[id0][id1]
+        snew = set([i0, i1])
+        for i0_old, i1_old in izip(edge['i0'], edge['i1']):
+            sold = set([i0_old, i1_old])
+            if snew == sold:
+                return
+        edge['i0'].append(i0)
+        edge['i1'].append(i1)
+        # print('Appending edge {} {} {} {} {} {}'.format(id0, id1, i0, i1, dist, edge['dist']))
+
+
 def get_match_graph(aca_stars, agasc_pairs, tolerance):
     idx0s = aca_stars['idx0']
     idx1s = aca_stars['idx1']
@@ -82,6 +100,13 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
 
     ap = vstack(ap_list)
 
+    if TEST_OVERLAPPING:
+        ok = np.zeros(len(ap), dtype=bool)
+        for match_id in [541731248, 541466560, 541460960, 541465104,
+                         541337704, 541862768, 541736344, 541730152]:
+            ok |= (ap['agasc_id0'] == match_id) | (ap['agasc_id1'] == match_id)
+        ap = ap[ok]
+
     agasc_id0 = ap['agasc_id0']
     agasc_id1 = ap['agasc_id1']
     i0 = ap['i0']
@@ -91,15 +116,24 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     for i in xrange(len(ap)):
         id0 = agasc_id0[i]
         id1 = agasc_id1[i]
-        edge_data = gmatch.get_edge_data(id0, id1, None)
-        if edge_data is None:
-            gmatch.add_edge(id0, id1, i0=[i0[i]], i1=[i1[i]], dist=dists[i])
-        else:
-            edge = gmatch[id0][id1]
-            edge['i0'].append(i0[i])
-            edge['i1'].append(i1[i])
+
+        add_edge(gmatch, id0, id1, i0[i], i1[i], dists[i])
 
     logger.info('Added edges with {} nodes'.format(len(gmatch)))
+
+    if TEST_OVERLAPPING:
+        match_tris = get_triangles(gmatch)
+        print('Matching triangles')
+        for tri in match_tris:
+            e0 = gmatch.get_edge_data(tri[0], tri[1])
+            e1 = gmatch.get_edge_data(tri[0], tri[2])
+            e2 = gmatch.get_edge_data(tri[1], tri[2])
+            print(tri[0], tri[1], tri[2], e0, e1, e2)
+
+        print('Edge data')
+        for n0, n1 in nx.edges(gmatch):
+            ed = gmatch.get_edge_data(n0, n1)
+            print(n0, n1, ed)
 
     return gmatch
 
@@ -121,22 +155,27 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
         e1 = g_dist_match.get_edge_data(tri[0], tri[2])
         e2 = g_dist_match.get_edge_data(tri[1], tri[2])
         match_count = 0
-        for e0_i0 in e0['i0']:
-            for e0_i1 in e0['i1']:
-                for e1_i0 in e1['i0']:
-                    for e1_i1 in e1['i1']:
-                        for e2_i0 in e2['i0']:
-                            for e2_i1 in e2['i1']:
-                                if tri[0] == 1230121648:
-                                    print [e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1], set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])
-                                if len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])) == 3:
-                                    g_geom_match.add_edge(tri[0], tri[1], i0=e0_i0, i1=e0_i1, dist=e0['dist'])
-                                    g_geom_match.add_edge(tri[0], tri[2], i0=e1_i0, i1=e1_i1, dist=e1['dist'])
-                                    g_geom_match.add_edge(tri[0], tri[1], i0=e2_i0, i1=e2_i1, dist=e2['dist'])
-                                    match_count += 1
+        for e0_i, e0_i0 in enumerate(e0['i0']):
+            e0_i1 = e0['i1'][e0_i]
+            for e1_i, e1_i0 in enumerate(e1['i0']):
+                e1_i1 = e1['i1'][e1_i]
+                for e2_i, e2_i0 in enumerate(e2['i0']):
+                    e2_i1 = e2['i1'][e2_i]
+                    if len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])) == 3:
+                        # print([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1], len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])))
+
+                        add_edge(g_geom_match, tri[0], tri[1], e0_i0, e0_i1, e0['dist'])
+                        add_edge(g_geom_match, tri[0], tri[2], e1_i0, e1_i1, e1['dist'])
+                        add_edge(g_geom_match, tri[2], tri[1], e2_i0, e2_i1, e2['dist'])
+                        match_count += 1
         if match_count > 1:
-            logger.info('** WARNING ** matched multiple plausible triangles for {} {} {}'
+            logger.info('** NOTE ** matched multiple plausible triangles for {} {} {}'
                          .format(*tri))
+
+    print('g_geom_match: ')
+    for n0, n1 in nx.edges(g_geom_match):
+        ed = g_geom_match.get_edge_data(n0, n1)
+        print(n0, n1, ed)
 
     out = []
 

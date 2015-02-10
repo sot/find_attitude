@@ -30,7 +30,7 @@ def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
     return stars
 
 
-def find_overlapping_distances(min_n_overlap=2, tolerance=2.0):
+def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
     while True:
         ra = np.random.uniform(0, 360)
         dec = np.random.uniform(-90, 90)
@@ -50,15 +50,17 @@ def find_overlapping_distances(min_n_overlap=2, tolerance=2.0):
             return ra, dec, roll, stars, dists
 
 
-def test_overlapping_distances():
+def test_overlapping_distances(tolerance=3.0):
     """
     Test a case where distance 5-7 = 864.35 and 5-1 is 865.808
     """
     global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
-    ra, dec, roll = (176.21566235300048, -36.4011650737424, 253.92152697511588)
+    ra, dec, roll = (176.21566235300048, -36.4011650737424, 253.92152697511588) # 2 overlaps, 2.0 tol
+    ra, dec, roll = (131.1371559426714, 65.25369723989581, 112.4351393383257)  # 3 overlaps, 3.0 tol
     stars = get_stars(ra, dec, roll, sigma_1axis=0.004, sigma_mag=0.2, brightest=True)
+    stars = stars[[0, 1, 2, 5, 6]]
     agasc_id_star_maps, g_geom_match, g_dist_match = find_all_matching_agasc_ids(
-        stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5', tolerance=1.0)
+        stars['YAG'], stars['ZAG'], stars['MAG_ACA'], 'distances.h5', tolerance=tolerance)
     check_output(agasc_id_star_maps, stars, ra, dec, roll)
 
 
