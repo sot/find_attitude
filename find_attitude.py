@@ -73,6 +73,19 @@ def add_edge(graph, id0, id1, i0, i1, dist):
         edge['i1'].append(i1)
 
 
+def connected_agasc_ids(ap):
+    """
+    Return agacs_ids that occur at least 4 times.  Each occurrence indicates
+    an edge containing that agasc_id node.
+    """
+    agasc_ids = np.concatenate((ap['agasc_id0'], ap['agasc_id1']))
+    c = Column(agasc_ids)
+    cg = c.group_by(c)
+    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= 4)
+    out = set(cg.groups.keys[i_big_enough].tolist())
+    return out
+
+
 def get_match_graph(aca_stars, agasc_pairs, tolerance):
     idx0s = aca_stars['idx0']
     idx1s = aca_stars['idx1']
@@ -100,6 +113,7 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
         logger.verbose('  Found {} matching pairs'.format(len(ap)))
 
     ap = vstack(ap_list)
+    connected_ids = connected_agasc_ids(ap)
 
     if TEST_OVERLAPPING:
         ok = np.zeros(len(ap), dtype=bool)
@@ -114,13 +128,13 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     i1 = ap['i1']
     dists = ap['dists']
 
-    logger.info('Adding {} edges'.format(len(ap)))
+    logger.info('Adding edges from {} matching distance pairs'.format(len(ap)))
 
     for i in xrange(len(ap)):
         id0 = agasc_id0[i]
         id1 = agasc_id1[i]
-
-        add_edge(gmatch, id0, id1, i0[i], i1[i], dists[i])
+        if id0 in connected_ids and id1 in connected_ids:
+            add_edge(gmatch, id0, id1, i0[i], i1[i], dists[i])
 
     if TEST_OVERLAPPING:
         match_tris = get_triangles(gmatch)
@@ -135,6 +149,8 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
         for n0, n1 in nx.edges(gmatch):
             ed = gmatch.get_edge_data(n0, n1)
             print(n0, n1, ed)
+
+    logger.info('Added total of {} nodes'.format(len(gmatch)))
 
     return gmatch
 
