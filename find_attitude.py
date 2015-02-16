@@ -1,7 +1,7 @@
 import collections
 from itertools import izip, product
 import numpy as np
-from astropy.table import Table, vstack, Column
+from astropy.table import Table, vstack, Column, MaskedColumn
 import networkx as nx
 import tables
 import pyyaks.logger
@@ -258,7 +258,7 @@ def find_all_matching_agasc_ids(yags, zags, mags=None, agasc_pairs_file=None, di
     stars = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
         stars, agasc_pairs_file, dist_match_graph, tolerance=tolerance)
-    return agasc_id_star_maps, g_geom_match, g_dist_match
+    return agasc_id_star_maps
 
 
 def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
@@ -305,7 +305,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     roll = np.degrees(m_ang - s_ang)
 
     y = np.concatenate([yags, zags])
-    ui.load_arrays(1, np.arange(len(y)), y)
+    ui.load_arrays(1, np.arange(len(y)), y, np.ones(len(y)))
     ui.load_user_model(yag_zag, "yagzag")
     ui.add_user_pars("yagzag", ["dra", "ddec", "droll"])
     ui.set_model(yagzag)
@@ -320,6 +320,73 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
 
     ui.thaw(yagzag.droll)
     ui.fit()
-
+    fit_results = ui.get_fit_results()
     m_yags, m_zags, att_fit = _yag_zag(yagzag.dra.val, yagzag.ddec.val, yagzag.droll.val)
-    return yags, zags, m_yags, m_zags, att_fit
+
+    out = dict(yags=yags,
+               zags=zags,
+               m_yags=m_yags,
+               m_zags=m_zags,
+               att_fit=att_fit,
+               statval=fit_results.statval,
+               agasc_id_star_map=agasc_id_star_map)
+
+    return out
+
+
+def find_attitude_solutions(stars, tolerance=2.0):
+    agasc_id_star_maps = find_all_matching_agasc_ids(stars['YAG'], stars['ZAG'], stars['MAG_ACA'],
+                                                     agasc_pairs_file='distances.h5',
+                                                     tolerance=tolerance)
+
+    solutions = []
+    for agasc_id_star_map in agasc_id_star_maps:
+        solution = find_attitude_for_agasc_ids(stars['YAG'], stars['ZAG'], agasc_id_star_map)
+
+        # Check to see if there is another solution that has overlapping
+        # stars.  If there are overlaps and this solution has a lower
+        # fit statistic then use this solution.
+        agasc_ids = set(agasc_id_star_map)
+        solution['agasc_ids'] = agasc_ids
+        for prev_solution in solutions:
+            if agasc_ids.intersection(prev_solution['agasc_ids']):
+                if solution['statval'] < prev_solution['statval']:
+                    prev_solution.update(solution)
+                break
+        else:
+            solutions.append(solution)
+
+    update_solutions(solutions, stars)
+    return solutions
+
+
+def update_solutions(solutions, stars):
+    for sol in solutions:
+        summ = Table(stars, masked=True)
+
+        indices = sol['agasc_id_star_map'].values()
+        for name in ('m_yag', 'dy', 'm_zag', 'dz', 'dr'):
+            summ[name] = MaskedColumn([-99.0] * len(summ), name=name, mask=True)
+        summ['m_agasc_id'] = MaskedColumn([-99] * len(summ), name='m_agasc_id', mask=True)
+
+        summ['m_yag'][indices] = sol['m_yags']
+        summ['dy'][indices] = sol['yags'] - sol['m_yags']
+        summ['m_zag'][indices] = sol['m_zags']
+        summ['dz'][indices] = sol['zags'] - sol['m_zags']
+        dr = np.sqrt((sol['yags'] - sol['m_yags']) ** 2
+                     + (sol['zags'] - sol['m_zags']) ** 2)
+        summ['dr'][indices] = dr
+        summ['m_agasc_id'][indices] = sol['agasc_id_star_map'].keys()
+
+        for name in summ.colnames:
+            if name in ('RA', 'DEC'):
+                format = '{:.4f}'
+            elif 'agasc' in name.lower():
+                format = '{:d}'
+            else:
+                format = '{:.2f}'
+            summ[name].format = format
+        sol['summary'] = summ
+
+        # Need at least 4 stars with radial fit residual < 3 arcsec
+        sol['bad_fit'] = np.sum(dr < 3.0) < 4
