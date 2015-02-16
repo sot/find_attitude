@@ -1,7 +1,7 @@
 import collections
 from itertools import izip, product
 import numpy as np
-from astropy.table import Table, vstack
+from astropy.table import Table, vstack, Column
 import networkx as nx
 import tables
 import pyyaks.logger
