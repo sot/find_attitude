@@ -1,11 +1,14 @@
 from __future__ import print_function, division
 
+from pprint import pprint
+
 import numpy as np
 import agasc
 from Ska.quatutil import radec2yagzag
 from Quaternion import Quat
 from astropy.io import ascii
-from find_attitude import get_dists_yag_zag, find_attitude_solutions
+from find_attitude import (get_dists_yag_zag, find_attitude_solutions,
+                           get_stars_from_text)
 
 
 def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
@@ -133,3 +136,70 @@ def test_ra_dec_roll(ra=115.770455413, dec=-77.6580358662, roll=86.4089128685, b
                       brightest=brightest)
     solutions = find_attitude_solutions(stars)
     check_output(solutions, stars, ra, dec, roll)
+
+
+def test_get_stars_from_greta():
+    text = """
+         OBSID  17595                    AOACINTT  1697.656   AOACPRGS        0       AOCINTNP      ENAB     AODITHR3  3.7928e-05
+
+                                                                            AOFWAIT  NOWT      Acquisition
+       ACA     IMAGE Status  Image   Fid Lt      Centroid Angle     Star    AOACASEQ KALM        Success        GLOBAL STATUS
+       MEAS      #   Flags   Functn  Flag        Y         Z        Mag     AOFSTAR  GUID     AORFSTR1    1     AOACPWRF   OK
+      IMAGE 0  0      FID    TRAK    FID      922.53   -1004.43      7.2    AONSTARS    5     AORFSTR2    4     AOACRAMF   OK
+      IMAGE 1  1      FID    TRAK    FID     2141.40     896.38      7.2    AOKALSTR    5                       AOACROMF   OK
+      IMAGE 2  2      FID    TRAK    FID    -1825.12     893.98      7.1                      ENTRY 0    ID     AOACSUMF   OK
+      IMAGE 3  3     STAR    TRAK   STAR      223.33      55.83      9.7    SUCCESS FLAGS     ENTRY 1    ID     AOACHIBK   OK
+      IMAGE 4  4     STAR    TRAK   STAR     -453.10   -2084.10      9.6    AOACQSUC  SUC     ENTRY 2    ID
+      IMAGE 5  5     STAR    TRAK   STAR    -1255.12     196.58      9.2    AOGDESUC  SUC     ENTRY 3    ID     AOACCALF   OK
+      IMAGE 6  6     STAR    TRAK   STAR      598.18    2287.97      9.6    AOBRTSUC  SUC     ENTRY 4    ID     AOACRSET   OK
+      IMAGE 7  7     STAR    TRAK   STAR     2311.45    1140.60      9.8    AOFIDSUC  SUC     ENTRY 5    ID     AOACSNTY   OK
+                                                                            AOACRPT     1     ENTRY 6    ID
+                                                                            AORSTART ENAB     ENTRY 7  NOID
+    """
+    expected = """
+    slot type function fid    YAG      ZAG   MAG_ACA
+    ---- ---- -------- ---- -------- ------- -------
+       3 STAR     TRAK STAR   223.33   55.83     9.7
+       4 STAR     TRAK STAR   -453.1 -2084.1     9.6
+       5 STAR     TRAK STAR -1255.12  196.58     9.2
+       6 STAR     TRAK STAR   598.18 2287.97     9.6
+       7 STAR     TRAK STAR  2311.45  1140.6     9.8
+    """
+    stars = get_stars_from_text(text)
+    expected_stars = ascii.read(expected, format='fixed_width_two_line', guess=False)
+    assert all(np.all(stars[name] == expected_stars[name])
+               for name in ('slot', 'YAG', 'ZAG', 'MAG_ACA'))
+    solutions = find_attitude_solutions(stars, tolerance=2.5)
+    assert len(solutions) == 1
+    solution = solutions[0]
+    pprint(solution)
+    print('RA, Dec, Roll', solutions[0]['att_fit'].equatorial)
+
+
+def test_get_stars_from_table():
+    text = """
+      slot yag zag mag
+      3     223.33      55.83      9.7
+      4    -453.10   -2084.10      9.6
+      5   -1255.12     196.58      9.2
+      6     598.18    2287.97      9.6
+      7    2311.45    1140.60      9.8
+    """
+    expected = """
+    slot    YAG      ZAG   MAG_ACA
+    ----  -------- ------- -------
+       3    223.33   55.83     9.7
+       4    -453.1 -2084.1     9.6
+       5  -1255.12  196.58     9.2
+       6    598.18 2287.97     9.6
+       7   2311.45  1140.6     9.8
+    """
+    stars = get_stars_from_text(text)
+    expected_stars = ascii.read(expected, format='fixed_width_two_line', guess=False)
+    assert all(np.all(stars[name] == expected_stars[name])
+               for name in ('slot', 'YAG', 'ZAG', 'MAG_ACA'))
+    solutions = find_attitude_solutions(stars, tolerance=2.5)
+    assert len(solutions) == 1
+    solution = solutions[0]
+    pprint(solution)
+    print('RA, Dec, Roll', solutions[0]['att_fit'].equatorial)

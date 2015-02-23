@@ -5,13 +5,14 @@ from itertools import izip, product
 from ska_path import ska_path
 import numpy as np
 from astropy.table import Table, vstack, Column, MaskedColumn
+from astropy.io import ascii
 import networkx as nx
 import tables
 import pyyaks.logger
 
 DEBUG = False
 TEST_OVERLAPPING = False
-DELTA_MAG = 1.0  # Accept matches where candidate star is within DELTA_MAG of observed
+DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
 
 # Get the pre-made list of distances between AGASC stars.  The distances_kadi version
 # is a symlink to a file on the kadi machine /export disk (faster).  However, if
@@ -25,6 +26,52 @@ except KeyError:
 loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attitude', level=loglevel,
                                   format="%(asctime)s %(message)s")
+
+
+def get_stars_from_text(text):
+    """
+    Get stars table from ``text`` input which can be a minimal hand-entered table
+    or copy/paste from GRETA A_ACA_ALL.
+    """
+    greta_fields = "MEAS # Flags Functn Flag Y Z Mag".split()
+
+    # Split input into a list of lists
+    lines = text.splitlines()
+    values_list = [line.split() for line in lines]
+
+    # Get a list of lines that match GRETA ACA status fields start line
+    greta_start = [i_line for i_line, values in enumerate(values_list)
+                   if greta_fields == values[:8]]
+    if greta_start:
+        i_start = greta_start[0] + 1
+        values_lines = [' '.join(values[2:9]) for values in values_list[i_start:i_start + 8]]
+        try:
+            stars = ascii.read(values_lines, format='no_header',
+                               names=['slot', 'type', 'function', 'fid', 'YAG', 'ZAG', 'MAG_ACA'])
+        except:
+            raise ValueError('Could not parse input')
+        ok = ((stars['type'] == 'STAR')
+              & (stars['function'] == 'TRAK')
+              & (stars['fid'] == 'STAR')
+              & (stars['YAG'] > -3200)
+              & (stars['ZAG'] > -3200))
+
+    else:
+        # Space-delimited table input with slot, yag, zag, and mag columns
+        try:
+            stars = ascii.read(text, format='basic', delimiter=' ', guess=False)
+        except:
+            raise ValueError('Could not parse input')
+        colnames = ['slot', 'yag', 'zag', 'mag']
+        if not set(stars.colnames).issuperset(colnames):
+            raise ValueError('Found column names {} in input but need column names {}'
+                             .format(stars.colnames, colnames))
+        stars.rename_column('yag', 'YAG')
+        stars.rename_column('zag', 'ZAG')
+        stars.rename_column('mag', 'MAG_ACA')
+        ok = (stars['YAG'] > -3200) & (stars['ZAG'] > -3200)
+
+    return stars[ok]
 
 
 def get_dists_yag_zag(yags, zags, mags=None):
@@ -267,7 +314,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
 
 
 def find_all_matching_agasc_ids(yags, zags, mags=None, agasc_pairs_file=None, dist_match_graph=None,
-                                tolerance=2.0):
+                                tolerance=2.5):
     stars = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
         stars, agasc_pairs_file, dist_match_graph, tolerance=tolerance)
@@ -347,7 +394,11 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     return out
 
 
-def find_attitude_solutions(stars, tolerance=2.0):
+def find_attitude_solutions(stars, tolerance=2.5):
+    if len(stars) < 4:
+        raise ValueError('need at least 4 stars for matching, only {} were provided'
+                         .format(len(stars)))
+
     agasc_id_star_maps = find_all_matching_agasc_ids(stars['YAG'], stars['ZAG'], stars['MAG_ACA'],
                                                      agasc_pairs_file=AGASC_PAIRS_FILE,
                                                      tolerance=tolerance)
@@ -396,9 +447,12 @@ def update_solutions(solutions, stars):
                 format = '{:.4f}'
             elif 'agasc' in name.lower():
                 format = '{:d}'
-            else:
+            elif name in ('m_yag', 'dy', 'm_zag', 'dz', 'dr'):
                 format = '{:.2f}'
-            summ[name].format = format
+            else:
+                format = None
+            if format:
+                summ[name].format = format
         sol['summary'] = summ
 
         # Need at least 4 stars with radial fit residual < 3 arcsec
