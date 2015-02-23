@@ -1,5 +1,8 @@
+import os
 import collections
 from itertools import izip, product
+
+from ska_path import ska_path
 import numpy as np
 from astropy.table import Table, vstack, Column, MaskedColumn
 import networkx as nx
@@ -10,8 +13,17 @@ DEBUG = False
 TEST_OVERLAPPING = False
 DELTA_MAG = 1.0  # Accept matches where candidate star is within DELTA_MAG of observed
 
+# Get the pre-made list of distances between AGASC stars.  The distances_kadi version
+# is a symlink to a file on the kadi machine /export disk (faster).  However, if
+# AGASC_PAIRS_FILE env var is defined then use that (for test/development).
+try:
+    AGASC_PAIRS_FILE = os.environ['AGASC_PAIRS_FILE']
+except KeyError:
+    AGASC_PAIRS_FILE = (ska_path('data', 'find_attitude', 'distances-kadi-local.h5') or
+                        ska_path('data', 'find_attitude', 'distances.h5'))
+
 loglevel = pyyaks.logger.INFO
-logger = pyyaks.logger.get_logger(name='find_attidue', level=loglevel,
+logger = pyyaks.logger.get_logger(name='find_attitude', level=loglevel,
                                   format="%(asctime)s %(message)s")
 
 
@@ -98,8 +110,8 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     logger.info('Getting matches from file')
     for i0, i1, dist, mag0, mag1 in izip(idx0s, idx1s, dists, mag0s, mag1s):
         logger.verbose('Getting matches from file {} {} {}'.format(i0, i1, dist))
-        ap = agasc_pairs.read_where('(dists > {}) & (dists < {})'
-                                    .format(dist - tolerance, dist + tolerance))
+        ap = agasc_pairs.readWhere('(dists > {}) & (dists < {})'
+                                   .format(dist - tolerance, dist + tolerance))
         # max_mag = max(mag0, mag1) + DELTA_MAG / 10.
         if DELTA_MAG is not None:
             max_mag = max(mag0, mag1) + DELTA_MAG
@@ -200,9 +212,10 @@ def get_slot_id_candidates(graph, nodes):
 
 def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5):
     if g_dist_match is None:
-        with tables.open_file(agasc_pairs_file, 'r') as h5:
-            agasc_pairs = h5.root.data
-            g_dist_match = get_match_graph(stars, agasc_pairs, tolerance)
+        h5 = tables.openFile(agasc_pairs_file, 'r')
+        agasc_pairs = h5.root.data
+        g_dist_match = get_match_graph(stars, agasc_pairs, tolerance)
+        h5.close()
 
     logger.info('Getting all triangles from match graph')
     match_tris = get_triangles(g_dist_match)
@@ -336,7 +349,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
 
 def find_attitude_solutions(stars, tolerance=2.0):
     agasc_id_star_maps = find_all_matching_agasc_ids(stars['YAG'], stars['ZAG'], stars['MAG_ACA'],
-                                                     agasc_pairs_file='distances.h5',
+                                                     agasc_pairs_file=AGASC_PAIRS_FILE,
                                                      tolerance=tolerance)
 
     solutions = []

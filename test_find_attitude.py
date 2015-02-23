@@ -4,9 +4,8 @@ import numpy as np
 import agasc
 from Ska.quatutil import radec2yagzag
 from Quaternion import Quat
-from astropy.table import Column
 from astropy.io import ascii
-# from find_attitude import find_all_matching_agasc_ids, find_attitude_for_agasc_ids
+from find_attitude import get_dists_yag_zag, find_attitude_solutions
 
 
 def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
@@ -30,7 +29,8 @@ def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
     stars['MAG_ACA'] += stars['MAG_ERROR']
     stars['RA'] = stars['RA_PMCORR']
     stars['DEC'] = stars['DEC_PMCORR']
-    stars = stars['AGASC_ID', 'RA', 'DEC', 'YAG', 'YAG_ERR', 'ZAG', 'ZAG_ERR', 'MAG_ACA', 'MAG_ERROR']
+    stars = stars['AGASC_ID', 'RA', 'DEC', 'YAG', 'YAG_ERR', 'ZAG', 'ZAG_ERR',
+                  'MAG_ACA', 'MAG_ERROR']
 
     return stars
 
@@ -44,7 +44,6 @@ def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
         stars = get_stars(ra, dec, roll, sigma_1axis=0.001, sigma_mag=0.2)
         dist_table = get_dists_yag_zag(stars['YAG'], stars['ZAG'])
         dists = dist_table['dists']
-        n_dists = len(dists)
 
         n_overlap = 0
         for i, d0 in enumerate(dists):
@@ -60,7 +59,6 @@ def test_overlapping_distances(tolerance=3.0):
     Test a case where distance 5-7 = 864.35 and 5-1 is 865.808
     """
     global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
-    ra, dec, roll = (176.21566235300048, -36.4011650737424, 253.92152697511588) # 2 overlaps, 2.0 tol
     ra, dec, roll = (131.1371559426714, 65.25369723989581, 112.4351393383257)  # 3 overlaps, 3.0 tol
     stars = get_stars(ra, dec, roll, sigma_1axis=0.004, sigma_mag=0.2, brightest=True)
 
@@ -84,7 +82,7 @@ def test_multiple_solutions():
     global stars, solutions
     ra, dec, roll = 190.3286989834239, 22.698443628394102, 111.51056234863053
     stars = ascii.read("""
- AGASC_ID       RA           DEC           YAG           YAG_ERR          ZAG           ZAG_ERR     MAG_ACA    MAG_ERROR    
+ AGASC_ID       RA           DEC           YAG           YAG_ERR          ZAG           ZAG_ERR     MAG_ACA    MAG_ERROR
 260863544 189.758890214 22.6594185253  567.401869049  0.615027692698  1811.01764078 -0.293256251994 6.47267   0.280073674992
 189804208 191.093682446 21.9926851164 -3294.27782744 -0.181642428933 -1445.81915638  0.812100708212 7.94189   0.199006301588
 189800592 190.343952117 21.8305748811 -2925.81601843    -0.381447575  1098.70907129  0.455625742141  9.0004   0.265371250728
@@ -131,6 +129,7 @@ def check_output(solutions, stars, ra, dec, roll):
 def test_ra_dec_roll(ra=115.770455413, dec=-77.6580358662, roll=86.4089128685, brightest=True,
                      provide_mags=True, sigma_1axis=0.4, sigma_mag=0.2):
     global stars, agasc_id_star_maps, g_geom_match, g_dist_match, solutions
-    stars = get_stars(ra, dec, roll, sigma_1axis=sigma_1axis, sigma_mag=sigma_mag, brightest=brightest)
+    stars = get_stars(ra, dec, roll, sigma_1axis=sigma_1axis, sigma_mag=sigma_mag,
+                      brightest=brightest)
     solutions = find_attitude_solutions(stars)
     check_output(solutions, stars, ra, dec, roll)

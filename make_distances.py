@@ -47,7 +47,7 @@ def make_microagasc(max_mag=10.5, outfile='microagasc.fits'):
 def get_microagasc(filename='microagasc.fits', date=None, max_mag=10.5):
     if not os.path.exists(filename):
         make_microagasc()
-    t = Table.read(filename)
+    t = Table.read(filename, format='fits')
     t = t[t['mag_aca'] < max_mag]
 
     # Compute the multiplicative factor to convert from the AGASC proper motion
@@ -128,7 +128,7 @@ def make_h5_file(t, filename='distances.h5'):
 
     with tables.openFile(filename, mode='a', filters=filters) as h5:
         print('Creating index')
-        h5.root.data.cols.dists.create_index()
+        h5.root.data.cols.dists.createIndex()
         h5.flush()
 
 
