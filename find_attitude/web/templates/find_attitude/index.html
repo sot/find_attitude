@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block body %}
+<body class="with-background">
+{% endblock %}
+
+{% block content %}
+<p><p>
+<h1 align="center"> Find Chandra attitude from stars </h1>
+
+
+<form action="/find_attitude/" method="post">
+      {% csrf_token %}
+      <div class="row">
+        <div class="large-12 columns">
+          <p>Enter ACA star data below using either GRETA display A_ACA_ALL or as a simple text
+          table.</p>
+          <p>Click Submit and wait for up to a minute for the attitude solution
+          results.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="large-2 columns">
+          <label for="right-label" class="right inline">Distance Tolerance (arcsec)</label>
+        </div>
+        <div class="large-1 columns">
+          <input type="text" id="right-label" name="tolerance" value="{{distance_tolerance}}">
+        </div>
+        <div class="large-9 columns"> &nbsp; </div>
+      </div>
+
+      <div class="row">
+        <div class="large-12 columns">
+          <textarea id="right-label"
+                    style="font-family:Consolas,Monaco,Lucida Console,Liberation
+                           Mono,DejaVu Sans Mono,Bitstream Vera Sans Mono,Courier New,
+                           monospace;"
+                    rows="10" cols="80" name="stars_text">{{stars_text}}</textarea>
+          <input type="submit" value="Submit">
+        </div>
+      </div>
+</form>
+
+{% if error_message %}
+  <h2> ERROR </h2>
+  <pre>
+    {{ error_message }}
+  </pre>
+{% endif %}
+
+{% if solutions %}
+  {% for solution in solutions %}
+  <h2> Attitude solution </h2>
+  <h4> Coordinates </h4>
+  <div class="row">
+    <div class="large-3 columns">
+      <p> <strong>
+          RA={{solution.att_fit.ra}} <br>
+          Dec={{solution.att_fit.dec}} <br>
+          Roll={{solution.att_fit.roll}} <br>
+          </strong>
+      </p>
+    </div>
+    <div class="large-3 columns end">
+      <p> <strong>
+          Q1={{solution.att_fit.q.0}} <br>
+          Q2={{solution.att_fit.q.1}} <br>
+          Q3={{solution.att_fit.q.2}} <br>
+          Q4={{solution.att_fit.q.3}} <br>
+          </strong>
+      </p>
+    </div>
+  </div>
+  <pre>
+  <h4> Star match summary and residuals </h4>
+{{ solution.summary }}
+  </pre>
+  {% endfor %}
+
+{% else %}
+  <h2> Example inputs </h2>
+  <h3> GRETA copy/paste </h3>
+<pre>
+Northrop Grumman/FOT Decom v1.2                                                             SC:2015007.060558  Fri Feb 27 17:35:04 2015
+COMMAND>
+                                     PCAD MODE   NPNT     TLM FORMAT   FMT2       CTU VCDU   2156840     AODITHEN        DISA
+ASPECT CAMERA TELEMETRY              AOCONLAW    NPNT     TLM SUBFMT   NORM       OBC VCDU   2156832     AODITHR1  0.0000e+00
+                                     AOABERRN    DISA     AOFATTUP     NONE       AOETIMEX 473925968     AODITHR2  0.0000e+00
+     OBSID      0                    AOACINTT  704.688    AOACPRGS        0       AOCINTNP      ENAB     AODITHR3  0.0000e+00
+
+                                                                        AOFWAIT  NOWT      Acquisition
+   ACA     IMAGE Status  Image   Fid Lt      Centroid Angle     Star    AOACASEQ KALM        Success        GLOBAL STATUS
+   MEAS      #   Flags   Functn  Flag        Y         Z        Mag     AOFSTAR  BRIT     AORFSTR1    6     AOACPWRF   OK
+  IMAGE 0  0     STAR    TRAK   STAR     -381.28    1479.95      7.2    AONSTARS    7     AORFSTR2    7     AOACRAMF   OK
+  IMAGE 1  1     STAR    TRAK   STAR     -582.55    -830.85      8.9    AOKALSTR    7                       AOACROMF   OK
+  IMAGE 2  2     STAR    TRAK   STAR     2076.33   -2523.10      8.5                      ENTRY 0    ID     AOACSUMF   OK
+  IMAGE 3  3     STAR    TRAK   STAR     -498.12    -958.33      5.0    SUCCESS FLAGS     ENTRY 1  NOID     AOACHIBK   OK
+  IMAGE 4  4     STAR    TRAK   STAR     -431.68    1600.98      8.2    AOACQSUC NSUC     ENTRY 2    ID
+  IMAGE 5  5     STAR    TRAK   STAR     -282.40     980.50      7.9    AOGDESUC NSUC     ENTRY 3    ID     AOACCALF   OK
+  IMAGE 6  6     NULL    NONE   STAR    -3276.80   -3276.80     13.9    AOBRTSUC  SUC     ENTRY 4    ID     AOACRSET   OK
+  IMAGE 7  7     STAR    TRAK   STAR      573.25   -2411.70      7.1    AOFIDSUC NSUC     ENTRY 5    ID     AOACSNTY   OK
+</pre>
+<h3> Simple text table </h3>
+<pre>
+slot yag zag mag
+0    -381.28    1479.95      7.2
+1    -582.55    -830.85      8.9
+2    2076.33   -2523.10      8.5
+3    -498.12    -958.33      5.0
+4    -431.68    1600.98      8.2
+5    -282.40     980.50      7.9
+6   -3276.80   -3276.80     13.9
+7     573.25   -2411.70      7.1
+</pre>
+{% endif %}
+
+{% endblock %}

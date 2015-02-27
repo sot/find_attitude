@@ -1,6 +1,7 @@
 import os
 import collections
 from itertools import izip, product
+import logging
 
 from ska_path import ska_path
 import numpy as np
@@ -27,7 +28,6 @@ loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attitude', level=loglevel,
                                   format="%(asctime)s %(message)s")
 
-
 def get_stars_from_text(text):
     """
     Get stars table from ``text`` input which can be a minimal hand-entered table
@@ -36,6 +36,7 @@ def get_stars_from_text(text):
     greta_fields = "MEAS # Flags Functn Flag Y Z Mag".split()
 
     # Split input into a list of lists
+    text = str(text)
     lines = text.splitlines()
     values_list = [line.split() for line in lines]
 
@@ -48,8 +49,8 @@ def get_stars_from_text(text):
         try:
             stars = ascii.read(values_lines, format='no_header',
                                names=['slot', 'type', 'function', 'fid', 'YAG', 'ZAG', 'MAG_ACA'])
-        except:
-            raise ValueError('Could not parse input')
+        except Exception as err:
+            raise ValueError('Could not parse input: {}'.format(str(err)))
         ok = ((stars['type'] == 'STAR')
               & (stars['function'] == 'TRAK')
               & (stars['fid'] == 'STAR')
@@ -60,8 +61,9 @@ def get_stars_from_text(text):
         # Space-delimited table input with slot, yag, zag, and mag columns
         try:
             stars = ascii.read(text, format='basic', delimiter=' ', guess=False)
-        except:
-            raise ValueError('Could not parse input')
+        except Exception as err:
+            raise ValueError('Could not parse input: {}'.format(str(err)))
+
         colnames = ['slot', 'yag', 'zag', 'mag']
         if not set(stars.colnames).issuperset(colnames):
             raise ValueError('Found column names {} in input but need column names {}'
@@ -151,7 +153,7 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     dists = aca_stars['dists']
     mag0s = aca_stars['mag0']
     mag1s = aca_stars['mag1']
-    print('Starting get_match_graph')
+    logger.info('Starting get_match_graph')
     gmatch = nx.Graph()
     ap_list = []
     logger.info('Getting matches from file')
@@ -159,10 +161,10 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
         logger.verbose('Getting matches from file {} {} {}'.format(i0, i1, dist))
         ap = agasc_pairs.readWhere('(dists > {}) & (dists < {})'
                                    .format(dist - tolerance, dist + tolerance))
-        # max_mag = max(mag0, mag1) + DELTA_MAG / 10.
+
         if DELTA_MAG is not None:
             max_mag = max(mag0, mag1) + DELTA_MAG
-            mag_ok = (ap['mag0'] < max_mag) & (ap['mag1'] < max_mag)
+            mag_ok = (ap['mag0'] / 1000.0 < max_mag) & (ap['mag1'] / 1000.0 < max_mag)
             ap = ap[mag_ok]
 
         ones = np.ones(len(ap), dtype=np.uint8)
@@ -207,7 +209,7 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
         logger.info('Edge data')
         for n0, n1 in nx.edges(gmatch):
             ed = gmatch.get_edge_data(n0, n1)
-            print(n0, n1, ed)
+            logger.info(n0, n1, ed)
 
     logger.info('Added total of {} nodes'.format(len(gmatch)))
 
@@ -259,6 +261,7 @@ def get_slot_id_candidates(graph, nodes):
 
 def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5):
     if g_dist_match is None:
+        logger.info('Using AGASC pairs file {}'.format(agasc_pairs_file))
         h5 = tables.openFile(agasc_pairs_file, 'r')
         agasc_pairs = h5.root.data
         g_dist_match = get_match_graph(stars, agasc_pairs, tolerance)
@@ -331,6 +334,11 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     import agasc
     from Quaternion import Quat
     from Ska.quatutil import radec2yagzag
+
+    # Set sherpa logger to same level as local logger
+    sherpa_logger = logging.getLogger("sherpa")
+    for hdlr in sherpa_logger.handlers:
+        sherpa_logger.setLevel(logger.level)
 
     star_indices = agasc_id_star_map.values()
     yags = yags[star_indices]

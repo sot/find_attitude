@@ -98,8 +98,9 @@ def _get_dists(s0, s1):
     dists = dists.astype(np.float32)
     id0 = s0['agasc_id'][idx0].astype(np.int32)
     id1 = s1['agasc_id'][idx1].astype(np.int32)
-    mag0 = s0['mag_aca'][idx0].astype(np.float16)
-    mag1 = s1['mag_aca'][idx1].astype(np.float16)
+    # Store mag values in millimag as int16.  Clip for good measure.
+    mag0 = np.clip(s0['mag_aca'][idx0] * 1000, -32000, 32000).astype(np.int16)
+    mag1 = np.clip(s1['mag_aca'][idx1] * 1000, -32000, 32000).astype(np.int16)
 
     out = Table([dists, id0, id1, mag0, mag1],
                 names=['dists', 'agasc_id0', 'agasc_id1', 'mag0', 'mag1'])
