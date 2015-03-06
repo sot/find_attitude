@@ -7,9 +7,14 @@ from ska_path import ska_path
 import numpy as np
 from astropy.table import Table, vstack, Column, MaskedColumn
 from astropy.io import ascii
-import networkx as nx
 import tables
 import pyyaks.logger
+
+try:
+    import networkx as nx
+except ImportError:
+    import warnings
+    warnings.warn('find_attitude could not import networkx')
 
 DEBUG = False
 TEST_OVERLAPPING = False
