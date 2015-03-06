@@ -19,6 +19,12 @@ def index(request):
 
     context['kadi_version'] = __git_version__
     context['distance_tolerance'] = 2.5
+
+    if context.get('solutions'):
+        context['subtitle'] = ': Solution'
+    elif context.get('error_message'):
+        context['subtitle'] = ': Error'
+
     return render(request, 'find_attitude/index.html', context)
 
 
