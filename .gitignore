@@ -2,3 +2,5 @@
 *.h5
 *~
 *.ipynb
+build/
+dist/
