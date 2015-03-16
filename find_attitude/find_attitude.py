@@ -16,8 +16,6 @@ except ImportError:
     import warnings
     warnings.warn('find_attitude could not import networkx')
 
-DEBUG = False
-TEST_OVERLAPPING = False
 DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
 
 # Get the pre-made list of distances between AGASC stars.  The distances_kadi version
@@ -33,10 +31,34 @@ loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attitude', level=loglevel,
                                   format="%(asctime)s %(message)s")
 
+
 def get_stars_from_text(text):
     """
-    Get stars table from ``text`` input which can be a minimal hand-entered table
-    or copy/paste from GRETA A_ACA_ALL.
+    Get stars table from ``text`` input which can be a hand-entered table
+    or copy/paste from GRETA A_ACA_ALL.  Minimal conforming examples are::
+
+       MEAS      #   Flags   Functn  Flag        Y         Z        Mag
+      IMAGE 0  0     STAR    TRAK   STAR     -381.28    1479.95      7.2
+      IMAGE 1  1     STAR    TRAK   STAR     -582.55    -830.85      8.9
+      IMAGE 2  2     STAR    TRAK   STAR     2076.33   -2523.10      8.5
+      IMAGE 3  3     STAR    TRAK   STAR     -498.12    -958.33      5.0
+      IMAGE 4  4     STAR    TRAK   STAR     -431.68    1600.98      8.2
+      IMAGE 5  5     STAR    TRAK   STAR     -282.40     980.50      7.9
+      IMAGE 6  6     NULL    NONE   STAR    -3276.80   -3276.80     13.9
+      IMAGE 7  7     STAR    TRAK   STAR      573.25   -2411.70      7.1
+
+    or::
+
+      slot yag zag mag
+      3     223.33      55.83      9.7
+      4    -453.1      -2084.1     9.6
+      5   -1255.12     196.58      9.2
+      6     598.18    2287.97      9.6
+      7    2311.45    1140.60      9.8
+
+    :param text: text representation of input star table information.
+
+    :returns: Table of star data
     """
     greta_fields = "MEAS # Flags Functn Flag Y Z Mag".split()
 
@@ -82,6 +104,16 @@ def get_stars_from_text(text):
 
 
 def get_dists_yag_zag(yags, zags, mags=None):
+    """
+    Get distances between every pair of stars with coordinates ``yags`` and
+    ``zags``.  Returns a Table with columns 'dists', 'idx0', 'idx1', 'mag0', 'mag1'.
+
+    :param yags: np.array with star Y angles in arcsec
+    :param zags: np.array with star Z angles in arcsec
+    :param mags: np.array with star magnitudes (optional)
+
+    :returns: Table with pair distances and corollary info
+    """
     if np.all(np.abs(yags) < 2.0):
         # Must be in degrees, convert to arcsec
         yags = yags * 3600.
@@ -107,6 +139,17 @@ def get_dists_yag_zag(yags, zags, mags=None):
 
 
 def get_triangles(G):
+    """
+    Get all the triangles in graph ``G``
+
+    This code was taken from a google forum discussion posting by Daniel Schult.
+    No license or attribution request was provided.
+    https://groups.google.com/forum/#!topic/networkx-discuss/SHjKJFIFNtM
+
+    :param G: input networkx graph
+
+    :returns: list of (node0, node1, node2) tuples
+    """
     result = []
     done = set()
     for n in G:
@@ -125,7 +168,30 @@ def get_triangles(G):
 
 
 def add_edge(graph, id0, id1, i0, i1, dist):
+    """
+    Add an edge to the graph including metdata values ``i0``, ``i1`` and ``dist``.
+    ``id0`` and ``id1`` are the AGASC (and node) ID of the edge that gets inserted.
+
+    The ``i0``, ``i1`` index values represent the index into the ACA stars catalog
+    as taken from the ACA distance pair that matches the AGASC.  These catalog index
+    values are accumulated in a list because there may be multiple potential
+    assignments for each distance.
+
+    Note that at this point there is no order to the identifcation, so it could be
+    id0 <=> i0 or id0 <=> i1 (or none of the above).
+
+    :param graph: networkx graph
+    :param id0: AGASC / node ID of one node of the edge
+    :param id1: AGASC / node ID of the other node of the edge
+    :param i0: ACA star catalog index of one node of the edge
+    :param i1: ACA star catalog index of ther other node of the edge
+    :param dist: distance (arcsec) between nodes
+
+    :returns: None
+    """
+    # Get previous edge metadata if it exists
     edge_data = graph.get_edge_data(id0, id1, None)
+
     if edge_data is None:
         graph.add_edge(id0, id1, i0=[i0], i1=[i1], dist=dist)
     else:
@@ -143,30 +209,50 @@ def connected_agasc_ids(ap):
     """
     Return agacs_ids that occur at least 4 times.  Each occurrence indicates
     an edge containing that agasc_id node.
+
+    :param ap: table of AGASC pairs
+    :returns: set of AGASC IDs
     """
     agasc_ids = np.concatenate((ap['agasc_id0'], ap['agasc_id1']))
     c = Column(agasc_ids)
     cg = c.group_by(c)
-    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= 4)
+    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= 3)
     out = set(cg.groups.keys[i_big_enough].tolist())
+
     return out
 
 
-def get_match_graph(aca_stars, agasc_pairs, tolerance):
-    idx0s = aca_stars['idx0']
-    idx1s = aca_stars['idx1']
-    dists = aca_stars['dists']
-    mag0s = aca_stars['mag0']
-    mag1s = aca_stars['mag1']
+def get_match_graph(aca_pairs, agasc_pairs, tolerance):
+    """
+    Given a table of ``aca_pairs`` representing the distance between every pair in the
+    observed ACA centroid data, and the table of AGASC catalog pairs, assemble a network
+    graph of all AGASC pairs that correspond to an ACA pair.
+
+    From this initial graph select only nodes that have at least 3 connected edges.
+
+    :param aca_pairs: Table of pairwise distances for observed ACA star data
+    :param agasc_pairs: Table of pairwise distances for AGASC catalog stars
+    :param tolerance: matching distance (arcsec)
+
+    :returns: networkx graph of distance-match pairs
+    """
+    idx0s = aca_pairs['idx0']
+    idx1s = aca_pairs['idx1']
+    dists = aca_pairs['dists']
+    mag0s = aca_pairs['mag0']
+    mag1s = aca_pairs['mag1']
+
     logger.info('Starting get_match_graph')
     gmatch = nx.Graph()
     ap_list = []
+
     logger.info('Getting matches from file')
     for i0, i1, dist, mag0, mag1 in izip(idx0s, idx1s, dists, mag0s, mag1s):
         logger.verbose('Getting matches from file {} {} {}'.format(i0, i1, dist))
         ap = agasc_pairs.readWhere('(dists > {}) & (dists < {})'
                                    .format(dist - tolerance, dist + tolerance))
 
+        # Filter AGASC pairs based on star pairs magnitudes
         if DELTA_MAG is not None:
             max_mag = max(mag0, mag1) + DELTA_MAG
             mag_ok = (ap['mag0'] / 1000.0 < max_mag) & (ap['mag1'] / 1000.0 < max_mag)
@@ -178,15 +264,8 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
         ap_list.append(ap)
         logger.verbose('  Found {} matching pairs'.format(len(ap)))
 
-    ap = vstack(ap_list)
-    connected_ids = connected_agasc_ids(ap)
-
-    if TEST_OVERLAPPING:
-        ok = np.zeros(len(ap), dtype=bool)
-        for match_id in [541731248, 541466560, 541460960, 541465104,
-                         541337704, 541862768, 541736344, 541730152]:
-            ok |= (ap['agasc_id0'] == match_id) | (ap['agasc_id1'] == match_id)
-        ap = ap[ok]
+    ap = vstack(ap_list)  # Vertically stack the individual AGASC pairs tables into one big table
+    connected_ids = connected_agasc_ids(ap)  # Find nodes with at least three connections
 
     agasc_id0 = ap['agasc_id0']
     agasc_id1 = ap['agasc_id1']
@@ -194,27 +273,13 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
     i1 = ap['i1']
     dists = ap['dists']
 
+    # Finally make the graph of matching distance pairs
     logger.info('Adding edges from {} matching distance pairs'.format(len(ap)))
-
     for i in xrange(len(ap)):
         id0 = agasc_id0[i]
         id1 = agasc_id1[i]
         if id0 in connected_ids and id1 in connected_ids:
             add_edge(gmatch, id0, id1, i0[i], i1[i], dists[i])
-
-    if TEST_OVERLAPPING:
-        match_tris = get_triangles(gmatch)
-        logger.info('Matching triangles')
-        for tri in match_tris:
-            e0 = gmatch.get_edge_data(tri[0], tri[1])
-            e1 = gmatch.get_edge_data(tri[0], tri[2])
-            e2 = gmatch.get_edge_data(tri[1], tri[2])
-            logger.info(tri[0], tri[1], tri[2], e0, e1, e2)
-
-        logger.info('Edge data')
-        for n0, n1 in nx.edges(gmatch):
-            ed = gmatch.get_edge_data(n0, n1)
-            logger.info(n0, n1, ed)
 
     logger.info('Added total of {} nodes'.format(len(gmatch)))
 
@@ -222,6 +287,23 @@ def get_match_graph(aca_stars, agasc_pairs, tolerance):
 
 
 def get_slot_id_candidates(graph, nodes):
+    """
+    For a ``graph`` of nodes / edges that match the stars in distance, and a list of
+    ``clique_nodes`` which form a complete subgraph, find a list of identification
+    candidates which map node AGASC ID to ACA star catalog index number.  This handles
+    possible degenerate solutions and ensures that the outputs are topologically
+    sensible.
+
+    This is one of the trickier bits of algorithm, hence the complete lack of code
+    comments.  It basically tries all permutations of star catalog index number and sees
+    which ones end up as a complete graph (though it does this just by counting instead of
+    making graphs).
+
+    :param graph: graph of distance-match pairs
+    :param nodes: list of nodes that form a complete subgraph
+
+    :returns: list of dicts for plausible AGASC-ID to star index identifications
+    """
     class BadCandidateError(Exception):
         pass
 
@@ -265,6 +347,25 @@ def get_slot_id_candidates(graph, nodes):
 
 
 def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5):
+    """
+    Given an input table of ``stars`` find the matching cliques (completely connected
+    subgraphs) in the ``agasc_pairs_file`` of pair distances.  Do pair distance matching
+    to within ``tolerance`` arcsec.
+
+    At a minimum the stars table should include the following columns::
+
+        'AGASC_ID', 'RA', 'DEC', 'YAG', 'ZAG', 'MAG_ACA'
+
+    If ``g_dist_match`` is supplied then skip over reading the AGASC pairs and doing
+    initial matching.  This is mostly for development.
+
+    :param stars: table of up to 8 stars
+    :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py
+    :param g_dist_match: graph with matching distances (optional, for development)
+    :param tolerance: distance matching tolerance (arcsec)
+
+    :returns: list of possible AGASC-ID to star index maps
+    """
     if g_dist_match is None:
         logger.info('Using AGASC pairs file {}'.format(agasc_pairs_file))
         h5 = tables.openFile(agasc_pairs_file, 'r')
@@ -282,7 +383,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
         e0 = g_dist_match.get_edge_data(tri[0], tri[1])
         e1 = g_dist_match.get_edge_data(tri[0], tri[2])
         e2 = g_dist_match.get_edge_data(tri[1], tri[2])
-        match_count = 0
+
         for e0_i, e0_i0 in enumerate(e0['i0']):
             e0_i1 = e0['i1'][e0_i]
             for e1_i, e1_i0 in enumerate(e1['i0']):
@@ -293,16 +394,12 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
                         add_edge(g_geom_match, tri[0], tri[1], e0_i0, e0_i1, e0['dist'])
                         add_edge(g_geom_match, tri[0], tri[2], e1_i0, e1_i1, e1['dist'])
                         add_edge(g_geom_match, tri[2], tri[1], e2_i0, e2_i1, e2['dist'])
-                        match_count += 1
-        # if match_count > 1:
-        #     logger.info('** NOTE ** matched multiple plausible triangles for {} {} {}'
-        #                 .format(*tri))
 
-    if DEBUG:
-        print('g_geom_match: ')
+    if logger.level <= pyyaks.logger.DEBUG:
+        logger.debug('g_geom_match: ')
         for n0, n1 in nx.edges(g_geom_match):
             ed = g_geom_match.get_edge_data(n0, n1)
-            print(n0, n1, ed)
+            logger.debug(n0, n1, ed)
 
     out = []
 
@@ -318,20 +415,49 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
         out.extend(get_slot_id_candidates(g_geom_match, clique_nodes))
 
     logger.info('Done with graph matching')
-    return out, g_geom_match, g_dist_match
+    return out
 
 
 def find_all_matching_agasc_ids(yags, zags, mags=None, agasc_pairs_file=None, dist_match_graph=None,
                                 tolerance=2.5):
+    """
+    Given an input table of ``stars`` find the matching cliques (completely connected
+    subgraphs) in the ``agasc_pairs_file`` of pair distances.  Do pair distance matching
+    to within ``tolerance`` arcsec.
+
+    If ``g_dist_match`` is supplied then skip over reading the AGASC pairs and doing
+    initial matching.  This is mostly for development.
+
+    :param stars: table of up to 8 stars
+    :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py
+    :param dist_match_graph: graph with matching distances (optional, for development)
+    :param tolerance: distance matching tolerance (arcsec)
+
+    :returns: list of possible AGASC-ID to star index maps
+    """
     stars = get_dists_yag_zag(yags, zags, mags)
-    agasc_id_star_maps, g_geom_match, g_dist_match = find_matching_agasc_ids(
-        stars, agasc_pairs_file, dist_match_graph, tolerance=tolerance)
+    agasc_id_star_maps = find_matching_agasc_ids(stars, agasc_pairs_file,
+                                                 dist_match_graph, tolerance=tolerance)
     return agasc_id_star_maps
 
 
 def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     """
-    Find attitude for a given set of yags and zags and matching agasc_ids
+    Find the fine attitude for a given set of yags and zags and a map of AGASC ID
+    to star index (i.e. index into ``yags`` and ``zags`` arrays).
+
+    Returns a dictionary with keys::
+
+      yags : input Y angles
+      zags : input Z angles
+      m_yags : best fit Y angles
+      m_zags : best fit Z angles
+      att_fit : best fit attitude quaternion (Quat object)
+      statval : final fit statistic
+      agasc_id_star_map : input AGASC ID to star index map
+
+    :returns: dict
+
     """
     global yagzag
 
@@ -408,6 +534,29 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
 
 
 def find_attitude_solutions(stars, tolerance=2.5):
+    """
+    Find attitude solutions given an input table of star data.
+
+    The input star table must have columns 'YAG' (arcsec), 'ZAG' (arcsec), and
+    'MAG'.  There must be at least four stars for the matching algorithm to succeed.
+
+    The output is a list of solutions, where each solution is a dict with keys::
+
+      summary : copy of input stars table with new columns of useful info
+      yags : input Y angles
+      zags : input Z angles
+      m_yags : best fit Y angles
+      m_zags : best fit Z angles
+      agasc_ids : list of AGASC IDs corresponding to inputs
+      att_fit : best fit attitude quaternion (Quat object)
+      statval : final fit statistic
+      agasc_id_star_map : input AGASC ID to star index map
+
+    :param stars: table of star data
+    :param tolerance: matching tolerance (arcsec, default=2.5)
+
+    :returns: list of solutions, where each solution is a dict
+    """
     if len(stars) < 4:
         raise ValueError('need at least 4 stars for matching, only {} were provided'
                          .format(len(stars)))
@@ -433,11 +582,11 @@ def find_attitude_solutions(stars, tolerance=2.5):
         else:
             solutions.append(solution)
 
-    update_solutions(solutions, stars)
+    _update_solutions(solutions, stars)
     return solutions
 
 
-def update_solutions(solutions, stars):
+def _update_solutions(solutions, stars):
     for sol in solutions:
         summ = Table(stars, masked=True)
 
