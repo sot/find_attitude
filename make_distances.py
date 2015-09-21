@@ -27,7 +27,7 @@ def make_distances_h5(max_mag=10.5, outfile='distances.h5', microagasc_file='mic
 
 def make_microagasc(max_mag=10.5, outfile='microagasc.fits'):
     import tables
-    with tables.open_file('/proj/sot/ska/data/agasc/miniagasc.h5') as h5:
+    with tables.openFile('/proj/sot/ska/data/agasc/miniagasc.h5') as h5:
         print('Reading miniagasc ...')
         mag_aca = h5.root.data.col('MAG_ACA')
         ok = mag_aca < max_mag

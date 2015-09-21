@@ -203,3 +203,67 @@ def test_get_stars_from_table():
     solution = solutions[0]
     pprint(solution)
     print('RA, Dec, Roll', solutions[0]['att_fit'].equatorial)
+
+
+def test_at_time(time, qatt=None):
+    from Ska.engarchive import fetch
+    from Chandra.Time import DateTime
+    from astropy.table import Table
+    msids_all = []
+    msids = {}
+    typs = ('fid', 'yan', 'zan', 'mag')
+    for typ in typs:
+        msids[typ] = ['aoac{}{}'.format(typ, slot) for slot in range(8)]
+        msids_all.extend(msids[typ])
+
+    msids_all.extend(['aoattqt1', 'aoattqt2', 'aoattqt3', 'aoattqt4'])
+
+    tstart = DateTime(time).secs
+    tstop = tstart + 60
+    dat = fetch.MSIDset(msids_all, tstart, tstop)
+    dat.interpolate(2.05)
+    sample = {msid: dat[msid].vals[5] for msid in msids_all}
+
+    vals = {}
+    slots = [slot for slot in range(8)
+             if sample['aoacfid{}'.format(slot)] == 'STAR']
+    for typ in typs:
+        vals[typ] = [sample['aoac{}{}'.format(typ, slot)] for slot in range(8)
+                     if sample['aoacfid{}'.format(slot)] == 'STAR']
+
+    stars = Table([slots, vals['yan'], vals['zan'], vals['mag']],
+                  names=['slots', 'YAG', 'ZAG', 'MAG_ACA'])
+
+    if qatt is None:
+        qatt = Quat([dat['aoattqt{}'.format(i+1)].vals[5] for i in range(4)])
+    ra, dec, roll = qatt.equatorial
+
+    solutions = find_attitude_solutions(stars)
+
+    assert len(solutions) == 1
+    solution = solutions[0]
+    dq = qatt.inv() * solution['att_fit']
+
+    print(solution['att_fit'].equatorial)
+    print(solution['summary'])
+
+    assert abs(dq.q[0] * 2 * 3600) < 60   # arcsec
+    assert abs(dq.q[1] * 2 * 3600) < 1.5  # arcsec
+    assert abs(dq.q[2] * 2 * 3600) < 1.5
+
+
+def test_at_times():
+    mcc_results = """
+            2015:007:03:00:00   2015:007:03:05:00 - brute
+            2015:100:00:00:00   2015:100:00:05:00
+            2015:110:00:00:00   2015:110:00:05:00 - brute
+            2015:121:00:00:00   2015:121:00:05:00 - brute
+            2015:130:00:00:00   2015:130:00:05:00
+            2015:152:00:00:00   2015:152:00:05:00
+            2015:156:00:00:00   2015:156:00:05:00
+            2015:170:00:00:00   2015:170:00:05:00"""
+    times = [line.split()[0] for line in mcc_results.strip().splitlines()]
+    qatts = [None] * len(times)
+    qatts[0] = Quat([300.6576081, 66.73096392, 347.56528804])  # Telem aoattqt* are wrong
+    for time, qatt in zip(times, qatts):
+        test_at_time(time, qatt)
