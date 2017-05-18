@@ -205,7 +205,7 @@ def test_get_stars_from_table():
     print('RA, Dec, Roll', solutions[0]['att_fit'].equatorial)
 
 
-def test_at_time(time, qatt=None):
+def check_at_time(time, qatt=None):
     from Ska.engarchive import fetch
     from Chandra.Time import DateTime
     from astropy.table import Table
@@ -266,4 +266,4 @@ def test_at_times():
     qatts = [None] * len(times)
     qatts[0] = Quat([300.6576081, 66.73096392, 347.56528804])  # Telem aoattqt* are wrong
     for time, qatt in zip(times, qatts):
-        test_at_time(time, qatt)
+        check_at_time(time, qatt)
