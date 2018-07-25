@@ -71,7 +71,7 @@ def test_overlapping_distances(tolerance=3.0):
 
 
 def test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
-    for _ in xrange(n_iter):
+    for _ in range(n_iter):
         global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
         ra = np.random.uniform(0, 360)
         dec = np.random.uniform(-90, 90)

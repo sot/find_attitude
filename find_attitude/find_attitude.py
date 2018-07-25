@@ -1,14 +1,17 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import os
 import collections
-from itertools import izip, product
+from itertools import product
 import logging
+
+from six.moves import zip, range
 
 from ska_path import ska_path
 import numpy as np
 from astropy.table import Table, vstack, Column, MaskedColumn
 from astropy.io import ascii
 import tables
+import tables3_api
 import pyyaks.logger
 
 try:
@@ -198,7 +201,7 @@ def add_edge(graph, id0, id1, i0, i1, dist):
     else:
         edge = graph[id0][id1]
         snew = set([i0, i1])
-        for i0_old, i1_old in izip(edge['i0'], edge['i1']):
+        for i0_old, i1_old in zip(edge['i0'], edge['i1']):
             sold = set([i0_old, i1_old])
             if snew == sold:
                 return
@@ -248,10 +251,10 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
     ap_list = []
 
     logger.info('Getting matches from file')
-    for i0, i1, dist, mag0, mag1 in izip(idx0s, idx1s, dists, mag0s, mag1s):
+    for i0, i1, dist, mag0, mag1 in zip(idx0s, idx1s, dists, mag0s, mag1s):
         logger.verbose('Getting matches from file {} {} {}'.format(i0, i1, dist))
-        ap = agasc_pairs.readWhere('(dists > {}) & (dists < {})'
-                                   .format(dist - tolerance, dist + tolerance))
+        ap = agasc_pairs.read_where('(dists > {}) & (dists < {})'
+                                    .format(dist - tolerance, dist + tolerance))
 
         # Filter AGASC pairs based on star pairs magnitudes
         if DELTA_MAG is not None:
@@ -276,7 +279,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
 
     # Finally make the graph of matching distance pairs
     logger.info('Adding edges from {} matching distance pairs'.format(len(ap)))
-    for i in xrange(len(ap)):
+    for i in range(len(ap)):
         id0 = agasc_id0[i]
         id1 = agasc_id1[i]
         if id0 in connected_ids and id1 in connected_ids:
@@ -318,10 +321,10 @@ def get_slot_id_candidates(graph, nodes):
             i1_id1s_list.append([(i1, node1) for i1 in edge_data['i1']])
 
     id_candidates = []
-    for i0_id0s, i1_id1s in izip(product(*i0_id0s_list), product(*i1_id1s_list)):
+    for i0_id0s, i1_id1s in zip(product(*i0_id0s_list), product(*i1_id1s_list)):
         logger.info('')
         node_star_index_count = collections.defaultdict(collections.Counter)
-        for i0_id0, i1_id1 in izip(i0_id0s, i1_id1s):
+        for i0_id0, i1_id1 in zip(i0_id0s, i1_id1s):
             i0, id0 = i0_id0
             i1, id1 = i1_id1
             for i in i0, i1:
@@ -369,7 +372,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
     """
     if g_dist_match is None:
         logger.info('Using AGASC pairs file {}'.format(agasc_pairs_file))
-        h5 = tables.openFile(agasc_pairs_file, 'r')
+        h5 = tables.open_file(agasc_pairs_file, 'r')
         agasc_pairs = h5.root.data
         g_dist_match = get_match_graph(stars, agasc_pairs, tolerance)
         h5.close()
@@ -472,11 +475,11 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     for hdlr in sherpa_logger.handlers:
         sherpa_logger.setLevel(logger.level)
 
-    star_indices = agasc_id_star_map.values()
+    star_indices = list(agasc_id_star_map.values())
     yags = yags[star_indices]
     zags = zags[star_indices]
 
-    agasc_ids = agasc_id_star_map.keys()
+    agasc_ids = list(agasc_id_star_map.keys())
     agasc_stars = [agasc.get_star(agasc_id) for agasc_id in agasc_ids]
 
     ras = [s['RA_PMCORR'] for s in agasc_stars]
@@ -591,7 +594,7 @@ def _update_solutions(solutions, stars):
     for sol in solutions:
         summ = Table(stars, masked=True)
 
-        indices = sol['agasc_id_star_map'].values()
+        indices = list(sol['agasc_id_star_map'].values())
         for name in ('m_yag', 'dy', 'm_zag', 'dz', 'dr'):
             summ[name] = MaskedColumn([-99.0] * len(summ), name=name, mask=True)
         summ['m_agasc_id'] = MaskedColumn([-99] * len(summ), name='m_agasc_id', mask=True)
@@ -603,7 +606,7 @@ def _update_solutions(solutions, stars):
         dr = np.sqrt((sol['yags'] - sol['m_yags']) ** 2
                      + (sol['zags'] - sol['m_zags']) ** 2)
         summ['dr'][indices] = dr
-        summ['m_agasc_id'][indices] = sol['agasc_id_star_map'].keys()
+        summ['m_agasc_id'][indices] = list(sol['agasc_id_star_map'].keys())
 
         for name in summ.colnames:
             if name in ('RA', 'DEC'):
