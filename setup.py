@@ -2,7 +2,7 @@
 from distutils.core import setup
 
 setup(name='find_attitude',
-      version='0.2',
+      version='3.2',
       description='Find attitude given a list of ACA star yag/zag coordinates',
       author='Tom Aldcroft',
       author_email='taldcroft@cfa.harvard.edu',
