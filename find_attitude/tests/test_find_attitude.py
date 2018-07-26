@@ -8,7 +8,7 @@ import agasc
 from Ska.quatutil import radec2yagzag
 from Quaternion import Quat
 from astropy.io import ascii
-from find_attitude import (get_dists_yag_zag, find_attitude_solutions,
+from ..find_attitude import (get_dists_yag_zag, find_attitude_solutions,
                            get_stars_from_text)
 
 
