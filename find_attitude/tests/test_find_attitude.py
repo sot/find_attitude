@@ -23,7 +23,7 @@ def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
         index = np.arange(len(stars))
         np.random.shuffle(index)
         stars = stars[index]
-    stars = stars[select]
+    stars = stars[select].copy()
     yags, zags = radec2yagzag(stars['RA_PMCORR'], stars['DEC_PMCORR'], Quat([ra, dec, roll]))
     stars['YAG_ERR'] = np.random.normal(scale=sigma_1axis, size=len(stars))
     stars['ZAG_ERR'] = np.random.normal(scale=sigma_1axis, size=len(stars))
