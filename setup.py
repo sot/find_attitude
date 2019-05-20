@@ -13,5 +13,7 @@ setup(name='find_attitude',
       author_email='taldcroft@cfa.harvard.edu',
       packages=['find_attitude', 'find_attitude.web', 'find_attitude.tests'],
       package_data={'find_attitude.web': ['templates/*/*.html', 'templates/*.html']},
+      tests_require=['pytest'],
+      cmdclass=cmdclass,
       license='BSD',
       )
