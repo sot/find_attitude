@@ -8,7 +8,7 @@ import agasc
 from Ska.quatutil import radec2yagzag
 from Quaternion import Quat
 from astropy.io import ascii
-from find_attitude import (get_dists_yag_zag, find_attitude_solutions,
+from ..find_attitude import (get_dists_yag_zag, find_attitude_solutions,
                            get_stars_from_text)
 
 
@@ -23,7 +23,7 @@ def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
         index = np.arange(len(stars))
         np.random.shuffle(index)
         stars = stars[index]
-    stars = stars[select]
+    stars = stars[select].copy()
     yags, zags = radec2yagzag(stars['RA_PMCORR'], stars['DEC_PMCORR'], Quat([ra, dec, roll]))
     stars['YAG_ERR'] = np.random.normal(scale=sigma_1axis, size=len(stars))
     stars['ZAG_ERR'] = np.random.normal(scale=sigma_1axis, size=len(stars))
@@ -70,8 +70,8 @@ def test_overlapping_distances(tolerance=3.0):
     check_output(solutions, stars, ra, dec, roll)
 
 
-def test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
-    for _ in xrange(n_iter):
+def _test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
+    for _ in range(n_iter):
         global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
         ra = np.random.uniform(0, 360)
         dec = np.random.uniform(-90, 90)
