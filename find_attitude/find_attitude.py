@@ -11,7 +11,6 @@ import numpy as np
 from astropy.table import Table, vstack, Column, MaskedColumn
 from astropy.io import ascii
 import tables
-import tables3_api
 import pyyaks.logger
 
 try:
@@ -28,8 +27,8 @@ DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of ob
 try:
     AGASC_PAIRS_FILE = os.environ['AGASC_PAIRS_FILE']
 except KeyError:
-    AGASC_PAIRS_FILE = (ska_path('data', 'find_attitude', 'distances-kadi-local.h5') or
-                        ska_path('data', 'find_attitude', 'distances.h5'))
+    AGASC_PAIRS_FILE = (ska_path('data', 'find_attitude', 'distances-kadi-local.h5')
+                        or ska_path('data', 'find_attitude', 'distances.h5'))
 
 loglevel = pyyaks.logger.INFO
 logger = pyyaks.logger.get_logger(name='find_attitude', level=loglevel,

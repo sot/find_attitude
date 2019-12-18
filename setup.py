@@ -7,13 +7,14 @@ except ImportError:
     cmdclass = {}
 
 setup(name='find_attitude',
-      version='3.2',
       description='Find attitude given a list of ACA star yag/zag coordinates',
       author='Tom Aldcroft',
       author_email='taldcroft@cfa.harvard.edu',
       packages=['find_attitude', 'find_attitude.web', 'find_attitude.tests'],
       package_data={'find_attitude.web': ['templates/*/*.html', 'templates/*.html']},
       tests_require=['pytest'],
+      use_scm_version=True,
+      setup_requires=['setuptools_scm', 'setuptools_scm_git_archive'],
       cmdclass=cmdclass,
       license='BSD',
       )

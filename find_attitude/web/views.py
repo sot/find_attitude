@@ -2,7 +2,7 @@
 import os
 from django.shortcuts import render
 
-from kadi.version import __git_version__
+from kadi import __version__
 from find_attitude import get_stars_from_text, find_attitude_solutions, logger
 from logging import CRITICAL
 
@@ -18,7 +18,7 @@ def index(request):
     else:
         context = {}
 
-    context['kadi_version'] = __git_version__
+    context['kadi_version'] = __version__
     context['distance_tolerance'] = 2.5
 
     if context.get('solutions'):
@@ -46,7 +46,7 @@ def find_solutions_and_get_context(request):
     tolerance = float(request.POST.get('distance_tolerance', '2.5'))
     try:
         solutions = find_attitude_solutions(stars, tolerance=tolerance)
-    except:
+    except Exception:
         import traceback
         context['error_message'] = traceback.format_exc()
         return context
