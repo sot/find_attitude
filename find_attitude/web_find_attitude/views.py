@@ -3,7 +3,7 @@ import os
 from django.shortcuts import render
 
 from kadi import __version__
-from find_attitude import get_stars_from_text, find_attitude_solutions, logger
+from find_attitude.find_attitude import get_stars_from_text, find_attitude_solutions, logger
 from logging import CRITICAL
 
 # Only emit critical messages
