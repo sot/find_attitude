@@ -8,8 +8,8 @@ import agasc
 from Ska.quatutil import radec2yagzag
 from Quaternion import Quat
 from astropy.io import ascii
-from ..find_attitude import (get_dists_yag_zag, find_attitude_solutions,
-                           get_stars_from_text)
+from find_attitude.find_attitude import (get_dists_yag_zag, find_attitude_solutions,
+                                         get_stars_from_text)
 
 
 def get_stars(ra=119.98, dec=-78, roll=0, select=slice(None, 8), brightest=True,
