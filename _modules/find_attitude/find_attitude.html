@@ -1,0 +1,718 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>find_attitude.find_attitude &#8212; find_attitude 3.3.3.dev8+g14c64dc documentation</title>
+    <link rel="stylesheet" href="../../_static/bootstrap-astropy.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <script type="text/javascript" src="../../_static/sidebar.js"></script>
+    <script type="text/javascript" src="../../_static/copybutton.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link href='https://fonts.googleapis.com/css?family=Source+Sans+Pro:200,600' rel='stylesheet' type='text/css'/>
+
+  </head><body>
+<div class="topbar">
+  <a class="brand" title="Documentation Home" href="../../index.html"><span id="logotext1">Ska!</span><span id="logotext2">find_attitude</span><span id="logotext3"></span></a>
+  <ul>
+    
+    <li><a class="home" title="Homepage" href="">
+        <span id="logotext1"></span><span id="logotext2"></span>
+    </a></li>
+    <li><a title="General Index" href="../../genindex.html">Index</a></li>
+    <li><a title="Module Index" href="../../py-modindex.html">Modules</a></li>
+    <li>
+      
+      
+<form action="../../search.html" method="get">
+  <input type="text" name="q" placeholder="Search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+      
+    </li>
+  </ul>
+</div>
+
+<div class="related">
+    <h3>Navigation</h3>
+    <ul>
+      <li>
+	<a href="../../index.html">find_attitude 3.3.3.dev8+g14c64dc documentation</a>
+	 &#187;
+      </li>
+      <li><a href="../index.html" accesskey="U">Module code</a> &#187;</li>
+      
+       
+    </ul>
+</div>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for find_attitude.find_attitude</h1><div class="highlight"><pre>
+<span></span><span class="c1"># Licensed under a 3-clause BSD style license - see LICENSE.rst</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">collections</span>
+<span class="kn">from</span> <span class="nn">itertools</span> <span class="kn">import</span> <span class="n">product</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+
+<span class="kn">from</span> <span class="nn">six.moves</span> <span class="kn">import</span> <span class="nb">zip</span><span class="p">,</span> <span class="nb">range</span>
+
+<span class="kn">from</span> <span class="nn">ska_path</span> <span class="kn">import</span> <span class="n">ska_path</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">astropy.table</span> <span class="kn">import</span> <span class="n">Table</span><span class="p">,</span> <span class="n">vstack</span><span class="p">,</span> <span class="n">Column</span><span class="p">,</span> <span class="n">MaskedColumn</span>
+<span class="kn">from</span> <span class="nn">astropy.io</span> <span class="kn">import</span> <span class="n">ascii</span>
+<span class="kn">import</span> <span class="nn">tables</span>
+<span class="kn">import</span> <span class="nn">pyyaks.logger</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">networkx</span> <span class="k">as</span> <span class="nn">nx</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">warnings</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;find_attitude could not import networkx&#39;</span><span class="p">)</span>
+
+<span class="n">DELTA_MAG</span> <span class="o">=</span> <span class="mf">1.5</span>  <span class="c1"># Accept matches where candidate star is within DELTA_MAG of observed</span>
+
+<span class="c1"># Get the pre-made list of distances between AGASC stars.  The distances_kadi version</span>
+<span class="c1"># is a symlink to a file on the kadi machine /export disk (faster).  However, if</span>
+<span class="c1"># AGASC_PAIRS_FILE env var is defined then use that (for test/development).</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">AGASC_PAIRS_FILE</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;AGASC_PAIRS_FILE&#39;</span><span class="p">]</span>
+<span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+    <span class="n">AGASC_PAIRS_FILE</span> <span class="o">=</span> <span class="p">(</span><span class="n">ska_path</span><span class="p">(</span><span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="s1">&#39;find_attitude&#39;</span><span class="p">,</span> <span class="s1">&#39;distances-kadi-local.h5&#39;</span><span class="p">)</span>
+                        <span class="ow">or</span> <span class="n">ska_path</span><span class="p">(</span><span class="s1">&#39;data&#39;</span><span class="p">,</span> <span class="s1">&#39;find_attitude&#39;</span><span class="p">,</span> <span class="s1">&#39;distances.h5&#39;</span><span class="p">))</span>
+
+<span class="n">loglevel</span> <span class="o">=</span> <span class="n">pyyaks</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">INFO</span>
+<span class="n">logger</span> <span class="o">=</span> <span class="n">pyyaks</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">get_logger</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;find_attitude&#39;</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="n">loglevel</span><span class="p">,</span>
+                                  <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">%(asctime)s</span><span class="s2"> </span><span class="si">%(message)s</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="get_stars_from_text"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.get_stars_from_text">[docs]</a><span class="k">def</span> <span class="nf">get_stars_from_text</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get stars table from ``text`` input which can be a hand-entered table</span>
+<span class="sd">    or copy/paste from GRETA A_ACA_ALL.  Minimal conforming examples are::</span>
+
+<span class="sd">       MEAS      #   Flags   Functn  Flag        Y         Z        Mag</span>
+<span class="sd">      IMAGE 0  0     STAR    TRAK   STAR     -381.28    1479.95      7.2</span>
+<span class="sd">      IMAGE 1  1     STAR    TRAK   STAR     -582.55    -830.85      8.9</span>
+<span class="sd">      IMAGE 2  2     STAR    TRAK   STAR     2076.33   -2523.10      8.5</span>
+<span class="sd">      IMAGE 3  3     STAR    TRAK   STAR     -498.12    -958.33      5.0</span>
+<span class="sd">      IMAGE 4  4     STAR    TRAK   STAR     -431.68    1600.98      8.2</span>
+<span class="sd">      IMAGE 5  5     STAR    TRAK   STAR     -282.40     980.50      7.9</span>
+<span class="sd">      IMAGE 6  6     NULL    NONE   STAR    -3276.80   -3276.80     13.9</span>
+<span class="sd">      IMAGE 7  7     STAR    TRAK   STAR      573.25   -2411.70      7.1</span>
+
+<span class="sd">    or::</span>
+
+<span class="sd">      slot yag zag mag</span>
+<span class="sd">      3     223.33      55.83      9.7</span>
+<span class="sd">      4    -453.1      -2084.1     9.6</span>
+<span class="sd">      5   -1255.12     196.58      9.2</span>
+<span class="sd">      6     598.18    2287.97      9.6</span>
+<span class="sd">      7    2311.45    1140.60      9.8</span>
+
+<span class="sd">    :param text: text representation of input star table information.</span>
+
+<span class="sd">    :returns: Table of star data</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">greta_fields</span> <span class="o">=</span> <span class="s2">&quot;MEAS # Flags Functn Flag Y Z Mag&quot;</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+
+    <span class="c1"># Split input into a list of lists</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
+    <span class="n">values_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">()</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">]</span>
+
+    <span class="c1"># Get a list of lines that match GRETA ACA status fields start line</span>
+    <span class="n">greta_start</span> <span class="o">=</span> <span class="p">[</span><span class="n">i_line</span> <span class="k">for</span> <span class="n">i_line</span><span class="p">,</span> <span class="n">values</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">values_list</span><span class="p">)</span>
+                   <span class="k">if</span> <span class="n">greta_fields</span> <span class="o">==</span> <span class="n">values</span><span class="p">[:</span><span class="mi">8</span><span class="p">]]</span>
+    <span class="k">if</span> <span class="n">greta_start</span><span class="p">:</span>
+        <span class="n">i_start</span> <span class="o">=</span> <span class="n">greta_start</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">values_lines</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">values</span><span class="p">[</span><span class="mi">2</span><span class="p">:</span><span class="mi">9</span><span class="p">])</span> <span class="k">for</span> <span class="n">values</span> <span class="ow">in</span> <span class="n">values_list</span><span class="p">[</span><span class="n">i_start</span><span class="p">:</span><span class="n">i_start</span> <span class="o">+</span> <span class="mi">8</span><span class="p">]]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stars</span> <span class="o">=</span> <span class="n">ascii</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">values_lines</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;no_header&#39;</span><span class="p">,</span>
+                               <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;slot&#39;</span><span class="p">,</span> <span class="s1">&#39;type&#39;</span><span class="p">,</span> <span class="s1">&#39;function&#39;</span><span class="p">,</span> <span class="s1">&#39;fid&#39;</span><span class="p">,</span> <span class="s1">&#39;YAG&#39;</span><span class="p">,</span> <span class="s1">&#39;ZAG&#39;</span><span class="p">,</span> <span class="s1">&#39;MAG_ACA&#39;</span><span class="p">])</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Could not parse input: </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">err</span><span class="p">)))</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="p">((</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;STAR&#39;</span><span class="p">)</span>
+              <span class="o">&amp;</span> <span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;function&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;TRAK&#39;</span><span class="p">)</span>
+              <span class="o">&amp;</span> <span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;fid&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;STAR&#39;</span><span class="p">)</span>
+              <span class="o">&amp;</span> <span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;YAG&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="o">-</span><span class="mi">3200</span><span class="p">)</span>
+              <span class="o">&amp;</span> <span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;ZAG&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="o">-</span><span class="mi">3200</span><span class="p">))</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Space-delimited table input with slot, yag, zag, and mag columns</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stars</span> <span class="o">=</span> <span class="n">ascii</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;basic&#39;</span><span class="p">,</span> <span class="n">delimiter</span><span class="o">=</span><span class="s1">&#39; &#39;</span><span class="p">,</span> <span class="n">guess</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">err</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Could not parse input: </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">err</span><span class="p">)))</span>
+
+        <span class="n">colnames</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;slot&#39;</span><span class="p">,</span> <span class="s1">&#39;yag&#39;</span><span class="p">,</span> <span class="s1">&#39;zag&#39;</span><span class="p">,</span> <span class="s1">&#39;mag&#39;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">set</span><span class="p">(</span><span class="n">stars</span><span class="o">.</span><span class="n">colnames</span><span class="p">)</span><span class="o">.</span><span class="n">issuperset</span><span class="p">(</span><span class="n">colnames</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Found column names </span><span class="si">{}</span><span class="s1"> in input but need column names </span><span class="si">{}</span><span class="s1">&#39;</span>
+                             <span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">stars</span><span class="o">.</span><span class="n">colnames</span><span class="p">,</span> <span class="n">colnames</span><span class="p">))</span>
+        <span class="n">stars</span><span class="o">.</span><span class="n">rename_column</span><span class="p">(</span><span class="s1">&#39;yag&#39;</span><span class="p">,</span> <span class="s1">&#39;YAG&#39;</span><span class="p">)</span>
+        <span class="n">stars</span><span class="o">.</span><span class="n">rename_column</span><span class="p">(</span><span class="s1">&#39;zag&#39;</span><span class="p">,</span> <span class="s1">&#39;ZAG&#39;</span><span class="p">)</span>
+        <span class="n">stars</span><span class="o">.</span><span class="n">rename_column</span><span class="p">(</span><span class="s1">&#39;mag&#39;</span><span class="p">,</span> <span class="s1">&#39;MAG_ACA&#39;</span><span class="p">)</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;YAG&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="o">-</span><span class="mi">3200</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;ZAG&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="o">-</span><span class="mi">3200</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">stars</span><span class="p">[</span><span class="n">ok</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="get_dists_yag_zag"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.get_dists_yag_zag">[docs]</a><span class="k">def</span> <span class="nf">get_dists_yag_zag</span><span class="p">(</span><span class="n">yags</span><span class="p">,</span> <span class="n">zags</span><span class="p">,</span> <span class="n">mags</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get distances between every pair of stars with coordinates ``yags`` and</span>
+<span class="sd">    ``zags``.  Returns a Table with columns &#39;dists&#39;, &#39;idx0&#39;, &#39;idx1&#39;, &#39;mag0&#39;, &#39;mag1&#39;.</span>
+
+<span class="sd">    :param yags: np.array with star Y angles in arcsec</span>
+<span class="sd">    :param zags: np.array with star Z angles in arcsec</span>
+<span class="sd">    :param mags: np.array with star magnitudes (optional)</span>
+
+<span class="sd">    :returns: Table with pair distances and corollary info</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">yags</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">2.0</span><span class="p">):</span>
+        <span class="c1"># Must be in degrees, convert to arcsec</span>
+        <span class="n">yags</span> <span class="o">=</span> <span class="n">yags</span> <span class="o">*</span> <span class="mf">3600.</span>
+        <span class="n">zags</span> <span class="o">=</span> <span class="n">zags</span> <span class="o">*</span> <span class="mf">3600.</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">yags</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">zags</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;length of yags and zags must match&#39;</span><span class="p">)</span>
+
+    <span class="n">idx0</span><span class="p">,</span> <span class="n">idx1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mgrid</span><span class="p">[</span><span class="nb">slice</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">yags</span><span class="p">)),</span> <span class="nb">slice</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">yags</span><span class="p">))]</span>
+    <span class="n">idx0</span> <span class="o">=</span> <span class="n">idx0</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+    <span class="n">idx1</span> <span class="o">=</span> <span class="n">idx1</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="n">idx0</span> <span class="o">&gt;</span> <span class="n">idx1</span>
+    <span class="n">idx0</span> <span class="o">=</span> <span class="n">idx0</span><span class="p">[</span><span class="n">ok</span><span class="p">]</span>
+    <span class="n">idx1</span> <span class="o">=</span> <span class="n">idx1</span><span class="p">[</span><span class="n">ok</span><span class="p">]</span>
+
+    <span class="n">dists</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">yags</span><span class="p">[</span><span class="n">idx0</span><span class="p">]</span> <span class="o">-</span> <span class="n">yags</span><span class="p">[</span><span class="n">idx1</span><span class="p">])</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">zags</span><span class="p">[</span><span class="n">idx0</span><span class="p">]</span> <span class="o">-</span> <span class="n">zags</span><span class="p">[</span><span class="n">idx1</span><span class="p">])</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">dists</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">dists</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">mags</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">mags</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">dists</span><span class="p">)</span> <span class="o">*</span> <span class="mi">15</span>
+
+    <span class="k">return</span> <span class="n">Table</span><span class="p">([</span><span class="n">dists</span><span class="p">,</span> <span class="n">idx0</span><span class="p">,</span> <span class="n">idx1</span><span class="p">,</span> <span class="n">mags</span><span class="p">[</span><span class="n">idx0</span><span class="p">],</span> <span class="n">mags</span><span class="p">[</span><span class="n">idx1</span><span class="p">]],</span>
+                 <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;dists&#39;</span><span class="p">,</span> <span class="s1">&#39;idx0&#39;</span><span class="p">,</span> <span class="s1">&#39;idx1&#39;</span><span class="p">,</span> <span class="s1">&#39;mag0&#39;</span><span class="p">,</span> <span class="s1">&#39;mag1&#39;</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="get_triangles"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.get_triangles">[docs]</a><span class="k">def</span> <span class="nf">get_triangles</span><span class="p">(</span><span class="n">G</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get all the triangles in graph ``G``</span>
+
+<span class="sd">    This code was taken from a google forum discussion posting by Daniel Schult.</span>
+<span class="sd">    No license or attribution request was provided.</span>
+<span class="sd">    https://groups.google.com/forum/#!topic/networkx-discuss/SHjKJFIFNtM</span>
+
+<span class="sd">    :param G: input networkx graph</span>
+
+<span class="sd">    :returns: list of (node0, node1, node2) tuples</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">done</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">G</span><span class="p">:</span>
+        <span class="n">done</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+        <span class="n">nbrdone</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">nbrs</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">G</span><span class="p">[</span><span class="n">n</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">nbr</span> <span class="ow">in</span> <span class="n">nbrs</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">nbr</span> <span class="ow">in</span> <span class="n">done</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">nbrdone</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">nbr</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">both</span> <span class="ow">in</span> <span class="n">nbrs</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">G</span><span class="p">[</span><span class="n">nbr</span><span class="p">]):</span>
+                <span class="k">if</span> <span class="n">both</span> <span class="ow">in</span> <span class="n">done</span> <span class="ow">or</span> <span class="n">both</span> <span class="ow">in</span> <span class="n">nbrdone</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="n">nbr</span><span class="p">,</span> <span class="n">both</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">result</span></div>
+
+
+<div class="viewcode-block" id="add_edge"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.add_edge">[docs]</a><span class="k">def</span> <span class="nf">add_edge</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">,</span> <span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">dist</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Add an edge to the graph including metdata values ``i0``, ``i1`` and ``dist``.</span>
+<span class="sd">    ``id0`` and ``id1`` are the AGASC (and node) ID of the edge that gets inserted.</span>
+
+<span class="sd">    The ``i0``, ``i1`` index values represent the index into the ACA stars catalog</span>
+<span class="sd">    as taken from the ACA distance pair that matches the AGASC.  These catalog index</span>
+<span class="sd">    values are accumulated in a list because there may be multiple potential</span>
+<span class="sd">    assignments for each distance.</span>
+
+<span class="sd">    Note that at this point there is no order to the identifcation, so it could be</span>
+<span class="sd">    id0 &lt;=&gt; i0 or id0 &lt;=&gt; i1 (or none of the above).</span>
+
+<span class="sd">    :param graph: networkx graph</span>
+<span class="sd">    :param id0: AGASC / node ID of one node of the edge</span>
+<span class="sd">    :param id1: AGASC / node ID of the other node of the edge</span>
+<span class="sd">    :param i0: ACA star catalog index of one node of the edge</span>
+<span class="sd">    :param i1: ACA star catalog index of ther other node of the edge</span>
+<span class="sd">    :param dist: distance (arcsec) between nodes</span>
+
+<span class="sd">    :returns: None</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Get previous edge metadata if it exists</span>
+    <span class="n">edge_data</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">edge_data</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">graph</span><span class="o">.</span><span class="n">add_edge</span><span class="p">(</span><span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">,</span> <span class="n">i0</span><span class="o">=</span><span class="p">[</span><span class="n">i0</span><span class="p">],</span> <span class="n">i1</span><span class="o">=</span><span class="p">[</span><span class="n">i1</span><span class="p">],</span> <span class="n">dist</span><span class="o">=</span><span class="n">dist</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">edge</span> <span class="o">=</span> <span class="n">graph</span><span class="p">[</span><span class="n">id0</span><span class="p">][</span><span class="n">id1</span><span class="p">]</span>
+        <span class="n">snew</span> <span class="o">=</span> <span class="nb">set</span><span class="p">([</span><span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">i0_old</span><span class="p">,</span> <span class="n">i1_old</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">edge</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">],</span> <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">]):</span>
+            <span class="n">sold</span> <span class="o">=</span> <span class="nb">set</span><span class="p">([</span><span class="n">i0_old</span><span class="p">,</span> <span class="n">i1_old</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">snew</span> <span class="o">==</span> <span class="n">sold</span><span class="p">:</span>
+                <span class="k">return</span>
+        <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i0</span><span class="p">)</span>
+        <span class="n">edge</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="connected_agasc_ids"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.connected_agasc_ids">[docs]</a><span class="k">def</span> <span class="nf">connected_agasc_ids</span><span class="p">(</span><span class="n">ap</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Return agacs_ids that occur at least 4 times.  Each occurrence indicates</span>
+<span class="sd">    an edge containing that agasc_id node.</span>
+
+<span class="sd">    :param ap: table of AGASC pairs</span>
+<span class="sd">    :returns: set of AGASC IDs</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">agasc_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">((</span><span class="n">ap</span><span class="p">[</span><span class="s1">&#39;agasc_id0&#39;</span><span class="p">],</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;agasc_id1&#39;</span><span class="p">]))</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">Column</span><span class="p">(</span><span class="n">agasc_ids</span><span class="p">)</span>
+    <span class="n">cg</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">group_by</span><span class="p">(</span><span class="n">c</span><span class="p">)</span>
+    <span class="n">i_big_enough</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">cg</span><span class="o">.</span><span class="n">groups</span><span class="o">.</span><span class="n">indices</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">cg</span><span class="o">.</span><span class="n">groups</span><span class="o">.</span><span class="n">keys</span><span class="p">[</span><span class="n">i_big_enough</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+
+    <span class="k">return</span> <span class="n">out</span></div>
+
+
+<div class="viewcode-block" id="get_match_graph"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.get_match_graph">[docs]</a><span class="k">def</span> <span class="nf">get_match_graph</span><span class="p">(</span><span class="n">aca_pairs</span><span class="p">,</span> <span class="n">agasc_pairs</span><span class="p">,</span> <span class="n">tolerance</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Given a table of ``aca_pairs`` representing the distance between every pair in the</span>
+<span class="sd">    observed ACA centroid data, and the table of AGASC catalog pairs, assemble a network</span>
+<span class="sd">    graph of all AGASC pairs that correspond to an ACA pair.</span>
+
+<span class="sd">    From this initial graph select only nodes that have at least 3 connected edges.</span>
+
+<span class="sd">    :param aca_pairs: Table of pairwise distances for observed ACA star data</span>
+<span class="sd">    :param agasc_pairs: Table of pairwise distances for AGASC catalog stars</span>
+<span class="sd">    :param tolerance: matching distance (arcsec)</span>
+
+<span class="sd">    :returns: networkx graph of distance-match pairs</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">idx0s</span> <span class="o">=</span> <span class="n">aca_pairs</span><span class="p">[</span><span class="s1">&#39;idx0&#39;</span><span class="p">]</span>
+    <span class="n">idx1s</span> <span class="o">=</span> <span class="n">aca_pairs</span><span class="p">[</span><span class="s1">&#39;idx1&#39;</span><span class="p">]</span>
+    <span class="n">dists</span> <span class="o">=</span> <span class="n">aca_pairs</span><span class="p">[</span><span class="s1">&#39;dists&#39;</span><span class="p">]</span>
+    <span class="n">mag0s</span> <span class="o">=</span> <span class="n">aca_pairs</span><span class="p">[</span><span class="s1">&#39;mag0&#39;</span><span class="p">]</span>
+    <span class="n">mag1s</span> <span class="o">=</span> <span class="n">aca_pairs</span><span class="p">[</span><span class="s1">&#39;mag1&#39;</span><span class="p">]</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Starting get_match_graph&#39;</span><span class="p">)</span>
+    <span class="n">gmatch</span> <span class="o">=</span> <span class="n">nx</span><span class="o">.</span><span class="n">Graph</span><span class="p">()</span>
+    <span class="n">ap_list</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Getting matches from file&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">dist</span><span class="p">,</span> <span class="n">mag0</span><span class="p">,</span> <span class="n">mag1</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">idx0s</span><span class="p">,</span> <span class="n">idx1s</span><span class="p">,</span> <span class="n">dists</span><span class="p">,</span> <span class="n">mag0s</span><span class="p">,</span> <span class="n">mag1s</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">verbose</span><span class="p">(</span><span class="s1">&#39;Getting matches from file </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1"> </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">dist</span><span class="p">))</span>
+        <span class="n">ap</span> <span class="o">=</span> <span class="n">agasc_pairs</span><span class="o">.</span><span class="n">read_where</span><span class="p">(</span><span class="s1">&#39;(dists &gt; </span><span class="si">{}</span><span class="s1">) &amp; (dists &lt; </span><span class="si">{}</span><span class="s1">)&#39;</span>
+                                    <span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">dist</span> <span class="o">-</span> <span class="n">tolerance</span><span class="p">,</span> <span class="n">dist</span> <span class="o">+</span> <span class="n">tolerance</span><span class="p">))</span>
+
+        <span class="c1"># Filter AGASC pairs based on star pairs magnitudes</span>
+        <span class="k">if</span> <span class="n">DELTA_MAG</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">max_mag</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">mag0</span><span class="p">,</span> <span class="n">mag1</span><span class="p">)</span> <span class="o">+</span> <span class="n">DELTA_MAG</span>
+            <span class="n">mag_ok</span> <span class="o">=</span> <span class="p">(</span><span class="n">ap</span><span class="p">[</span><span class="s1">&#39;mag0&#39;</span><span class="p">]</span> <span class="o">/</span> <span class="mf">1000.0</span> <span class="o">&lt;</span> <span class="n">max_mag</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ap</span><span class="p">[</span><span class="s1">&#39;mag1&#39;</span><span class="p">]</span> <span class="o">/</span> <span class="mf">1000.0</span> <span class="o">&lt;</span> <span class="n">max_mag</span><span class="p">)</span>
+            <span class="n">ap</span> <span class="o">=</span> <span class="n">ap</span><span class="p">[</span><span class="n">mag_ok</span><span class="p">]</span>
+
+        <span class="n">ones</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ap</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+        <span class="n">ap</span> <span class="o">=</span> <span class="n">Table</span><span class="p">([</span><span class="n">ap</span><span class="p">[</span><span class="s1">&#39;dists&#39;</span><span class="p">],</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;agasc_id0&#39;</span><span class="p">],</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;agasc_id1&#39;</span><span class="p">],</span> <span class="n">i0</span> <span class="o">*</span> <span class="n">ones</span><span class="p">,</span> <span class="n">i1</span> <span class="o">*</span> <span class="n">ones</span><span class="p">],</span>
+                   <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;dists&#39;</span><span class="p">,</span> <span class="s1">&#39;agasc_id0&#39;</span><span class="p">,</span> <span class="s1">&#39;agasc_id1&#39;</span><span class="p">,</span> <span class="s1">&#39;i0&#39;</span><span class="p">,</span> <span class="s1">&#39;i1&#39;</span><span class="p">])</span>
+        <span class="n">ap_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ap</span><span class="p">)</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">verbose</span><span class="p">(</span><span class="s1">&#39;  Found </span><span class="si">{}</span><span class="s1"> matching pairs&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ap</span><span class="p">)))</span>
+
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">vstack</span><span class="p">(</span><span class="n">ap_list</span><span class="p">)</span>  <span class="c1"># Vertically stack the individual AGASC pairs tables into one big table</span>
+    <span class="n">connected_ids</span> <span class="o">=</span> <span class="n">connected_agasc_ids</span><span class="p">(</span><span class="n">ap</span><span class="p">)</span>  <span class="c1"># Find nodes with at least three connections</span>
+
+    <span class="n">agasc_id0</span> <span class="o">=</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;agasc_id0&#39;</span><span class="p">]</span>
+    <span class="n">agasc_id1</span> <span class="o">=</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;agasc_id1&#39;</span><span class="p">]</span>
+    <span class="n">i0</span> <span class="o">=</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">]</span>
+    <span class="n">i1</span> <span class="o">=</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">]</span>
+    <span class="n">dists</span> <span class="o">=</span> <span class="n">ap</span><span class="p">[</span><span class="s1">&#39;dists&#39;</span><span class="p">]</span>
+
+    <span class="c1"># Finally make the graph of matching distance pairs</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Adding edges from </span><span class="si">{}</span><span class="s1"> matching distance pairs&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ap</span><span class="p">)))</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">ap</span><span class="p">)):</span>
+        <span class="n">id0</span> <span class="o">=</span> <span class="n">agasc_id0</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">id1</span> <span class="o">=</span> <span class="n">agasc_id1</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">id0</span> <span class="ow">in</span> <span class="n">connected_ids</span> <span class="ow">and</span> <span class="n">id1</span> <span class="ow">in</span> <span class="n">connected_ids</span><span class="p">:</span>
+            <span class="n">add_edge</span><span class="p">(</span><span class="n">gmatch</span><span class="p">,</span> <span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">,</span> <span class="n">i0</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">i1</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">dists</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Added total of </span><span class="si">{}</span><span class="s1"> nodes&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">gmatch</span><span class="p">)))</span>
+
+    <span class="k">return</span> <span class="n">gmatch</span></div>
+
+
+<div class="viewcode-block" id="get_slot_id_candidates"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.get_slot_id_candidates">[docs]</a><span class="k">def</span> <span class="nf">get_slot_id_candidates</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    For a ``graph`` of nodes / edges that match the stars in distance, and a list of</span>
+<span class="sd">    ``clique_nodes`` which form a complete subgraph, find a list of identification</span>
+<span class="sd">    candidates which map node AGASC ID to ACA star catalog index number.  This handles</span>
+<span class="sd">    possible degenerate solutions and ensures that the outputs are topologically</span>
+<span class="sd">    sensible.</span>
+
+<span class="sd">    This is one of the trickier bits of algorithm, hence the complete lack of code</span>
+<span class="sd">    comments.  It basically tries all permutations of star catalog index number and sees</span>
+<span class="sd">    which ones end up as a complete graph (though it does this just by counting instead of</span>
+<span class="sd">    making graphs).</span>
+
+<span class="sd">    :param graph: graph of distance-match pairs</span>
+<span class="sd">    :param nodes: list of nodes that form a complete subgraph</span>
+
+<span class="sd">    :returns: list of dicts for plausible AGASC-ID to star index identifications</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">class</span> <span class="nc">BadCandidateError</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+        <span class="k">pass</span>
+
+    <span class="n">n_nodes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">nodes</span><span class="p">)</span>
+    <span class="n">i0_id0s_list</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">i1_id1s_list</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">node0</span><span class="p">,</span> <span class="n">node1</span> <span class="ow">in</span> <span class="n">nx</span><span class="o">.</span><span class="n">edges</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">nodes</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">node0</span> <span class="ow">in</span> <span class="n">nodes</span> <span class="ow">and</span> <span class="n">node1</span> <span class="ow">in</span> <span class="n">nodes</span><span class="p">:</span>
+            <span class="n">edge_data</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="n">node0</span><span class="p">,</span> <span class="n">node1</span><span class="p">)</span>
+            <span class="n">i0_id0s_list</span><span class="o">.</span><span class="n">append</span><span class="p">([(</span><span class="n">i0</span><span class="p">,</span> <span class="n">node0</span><span class="p">)</span> <span class="k">for</span> <span class="n">i0</span> <span class="ow">in</span> <span class="n">edge_data</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">]])</span>
+            <span class="n">i1_id1s_list</span><span class="o">.</span><span class="n">append</span><span class="p">([(</span><span class="n">i1</span><span class="p">,</span> <span class="n">node1</span><span class="p">)</span> <span class="k">for</span> <span class="n">i1</span> <span class="ow">in</span> <span class="n">edge_data</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">]])</span>
+
+    <span class="n">id_candidates</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i0_id0s</span><span class="p">,</span> <span class="n">i1_id1s</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">product</span><span class="p">(</span><span class="o">*</span><span class="n">i0_id0s_list</span><span class="p">),</span> <span class="n">product</span><span class="p">(</span><span class="o">*</span><span class="n">i1_id1s_list</span><span class="p">)):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="n">node_star_index_count</span> <span class="o">=</span> <span class="n">collections</span><span class="o">.</span><span class="n">defaultdict</span><span class="p">(</span><span class="n">collections</span><span class="o">.</span><span class="n">Counter</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i0_id0</span><span class="p">,</span> <span class="n">i1_id1</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">i0_id0s</span><span class="p">,</span> <span class="n">i1_id1s</span><span class="p">):</span>
+            <span class="n">i0</span><span class="p">,</span> <span class="n">id0</span> <span class="o">=</span> <span class="n">i0_id0</span>
+            <span class="n">i1</span><span class="p">,</span> <span class="n">id1</span> <span class="o">=</span> <span class="n">i1_id1</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">id_</span> <span class="ow">in</span> <span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">:</span>
+                    <span class="n">node_star_index_count</span><span class="p">[</span><span class="n">id_</span><span class="p">]</span><span class="o">.</span><span class="n">update</span><span class="p">([</span><span class="n">i</span><span class="p">])</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">agasc_id_star_index_map</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">agasc_id</span><span class="p">,</span> <span class="n">count_dict</span> <span class="ow">in</span> <span class="n">node_star_index_count</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">logger</span><span class="o">.</span><span class="n">verbose</span><span class="p">(</span><span class="s1">&#39;AGASC ID </span><span class="si">{}</span><span class="s1"> has counts </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">agasc_id</span><span class="p">,</span> <span class="n">count_dict</span><span class="p">))</span>
+                <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">count</span> <span class="ow">in</span> <span class="n">count_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="k">if</span> <span class="n">count</span> <span class="o">==</span> <span class="n">n_nodes</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                        <span class="n">agasc_id_star_index_map</span><span class="p">[</span><span class="n">agasc_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">index</span>
+                        <span class="k">break</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">logger</span><span class="o">.</span><span class="n">verbose</span><span class="p">(</span><span class="s1">&#39;  **** AGASC ID </span><span class="si">{}</span><span class="s1"> is incomplete **** &#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">agasc_id</span><span class="p">))</span>
+                    <span class="k">raise</span> <span class="n">BadCandidateError</span>
+        <span class="k">except</span> <span class="n">BadCandidateError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">id_candidates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">agasc_id_star_index_map</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">id_candidates</span></div>
+
+
+<div class="viewcode-block" id="find_matching_agasc_ids"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.find_matching_agasc_ids">[docs]</a><span class="k">def</span> <span class="nf">find_matching_agasc_ids</span><span class="p">(</span><span class="n">stars</span><span class="p">,</span> <span class="n">agasc_pairs_file</span><span class="p">,</span> <span class="n">g_dist_match</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">2.5</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Given an input table of ``stars`` find the matching cliques (completely connected</span>
+<span class="sd">    subgraphs) in the ``agasc_pairs_file`` of pair distances.  Do pair distance matching</span>
+<span class="sd">    to within ``tolerance`` arcsec.</span>
+
+<span class="sd">    At a minimum the stars table should include the following columns::</span>
+
+<span class="sd">        &#39;AGASC_ID&#39;, &#39;RA&#39;, &#39;DEC&#39;, &#39;YAG&#39;, &#39;ZAG&#39;, &#39;MAG_ACA&#39;</span>
+
+<span class="sd">    If ``g_dist_match`` is supplied then skip over reading the AGASC pairs and doing</span>
+<span class="sd">    initial matching.  This is mostly for development.</span>
+
+<span class="sd">    :param stars: table of up to 8 stars</span>
+<span class="sd">    :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py</span>
+<span class="sd">    :param g_dist_match: graph with matching distances (optional, for development)</span>
+<span class="sd">    :param tolerance: distance matching tolerance (arcsec)</span>
+
+<span class="sd">    :returns: list of possible AGASC-ID to star index maps</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">g_dist_match</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Using AGASC pairs file </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">agasc_pairs_file</span><span class="p">))</span>
+        <span class="n">h5</span> <span class="o">=</span> <span class="n">tables</span><span class="o">.</span><span class="n">open_file</span><span class="p">(</span><span class="n">agasc_pairs_file</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span>
+        <span class="n">agasc_pairs</span> <span class="o">=</span> <span class="n">h5</span><span class="o">.</span><span class="n">root</span><span class="o">.</span><span class="n">data</span>
+        <span class="n">g_dist_match</span> <span class="o">=</span> <span class="n">get_match_graph</span><span class="p">(</span><span class="n">stars</span><span class="p">,</span> <span class="n">agasc_pairs</span><span class="p">,</span> <span class="n">tolerance</span><span class="p">)</span>
+        <span class="n">h5</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Getting all triangles from match graph&#39;</span><span class="p">)</span>
+    <span class="n">match_tris</span> <span class="o">=</span> <span class="n">get_triangles</span><span class="p">(</span><span class="n">g_dist_match</span><span class="p">)</span>
+
+    <span class="c1"># New graph with only plausible triangles</span>
+    <span class="n">g_geom_match</span> <span class="o">=</span> <span class="n">nx</span><span class="o">.</span><span class="n">Graph</span><span class="p">()</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Finding triangles that match stars pattern&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">tri</span> <span class="ow">in</span> <span class="n">match_tris</span><span class="p">:</span>
+        <span class="n">e0</span> <span class="o">=</span> <span class="n">g_dist_match</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="n">tri</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">tri</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">e1</span> <span class="o">=</span> <span class="n">g_dist_match</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="n">tri</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">tri</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+        <span class="n">e2</span> <span class="o">=</span> <span class="n">g_dist_match</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="n">tri</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">tri</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+
+        <span class="k">for</span> <span class="n">e0_i</span><span class="p">,</span> <span class="n">e0_i0</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">e0</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">]):</span>
+            <span class="n">e0_i1</span> <span class="o">=</span> <span class="n">e0</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">][</span><span class="n">e0_i</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">e1_i</span><span class="p">,</span> <span class="n">e1_i0</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">e1</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">]):</span>
+                <span class="n">e1_i1</span> <span class="o">=</span> <span class="n">e1</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">][</span><span class="n">e1_i</span><span class="p">]</span>
+                <span class="k">for</span> <span class="n">e2_i</span><span class="p">,</span> <span class="n">e2_i0</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">e2</span><span class="p">[</span><span class="s1">&#39;i0&#39;</span><span class="p">]):</span>
+                    <span class="n">e2_i1</span> <span class="o">=</span> <span class="n">e2</span><span class="p">[</span><span class="s1">&#39;i1&#39;</span><span class="p">][</span><span class="n">e2_i</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">([</span><span class="n">e0_i0</span><span class="p">,</span> <span class="n">e0_i1</span><span class="p">,</span> <span class="n">e1_i0</span><span class="p">,</span> <span class="n">e1_i1</span><span class="p">,</span> <span class="n">e2_i0</span><span class="p">,</span> <span class="n">e2_i1</span><span class="p">]))</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                        <span class="n">add_edge</span><span class="p">(</span><span class="n">g_geom_match</span><span class="p">,</span> <span class="n">tri</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">tri</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">e0_i0</span><span class="p">,</span> <span class="n">e0_i1</span><span class="p">,</span> <span class="n">e0</span><span class="p">[</span><span class="s1">&#39;dist&#39;</span><span class="p">])</span>
+                        <span class="n">add_edge</span><span class="p">(</span><span class="n">g_geom_match</span><span class="p">,</span> <span class="n">tri</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">tri</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">e1_i0</span><span class="p">,</span> <span class="n">e1_i1</span><span class="p">,</span> <span class="n">e1</span><span class="p">[</span><span class="s1">&#39;dist&#39;</span><span class="p">])</span>
+                        <span class="n">add_edge</span><span class="p">(</span><span class="n">g_geom_match</span><span class="p">,</span> <span class="n">tri</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">tri</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">e2_i0</span><span class="p">,</span> <span class="n">e2_i1</span><span class="p">,</span> <span class="n">e2</span><span class="p">[</span><span class="s1">&#39;dist&#39;</span><span class="p">])</span>
+
+    <span class="k">if</span> <span class="n">logger</span><span class="o">.</span><span class="n">level</span> <span class="o">&lt;=</span> <span class="n">pyyaks</span><span class="o">.</span><span class="n">logger</span><span class="o">.</span><span class="n">DEBUG</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s1">&#39;g_geom_match: &#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">n0</span><span class="p">,</span> <span class="n">n1</span> <span class="ow">in</span> <span class="n">nx</span><span class="o">.</span><span class="n">edges</span><span class="p">(</span><span class="n">g_geom_match</span><span class="p">):</span>
+            <span class="n">ed</span> <span class="o">=</span> <span class="n">g_geom_match</span><span class="o">.</span><span class="n">get_edge_data</span><span class="p">(</span><span class="n">n0</span><span class="p">,</span> <span class="n">n1</span><span class="p">)</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="n">n0</span><span class="p">,</span> <span class="n">n1</span><span class="p">,</span> <span class="n">ed</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># Iterate through complete subgraphs (cliques) and require at least</span>
+    <span class="c1"># four nodes.</span>
+    <span class="k">for</span> <span class="n">clique_nodes</span> <span class="ow">in</span> <span class="n">nx</span><span class="o">.</span><span class="n">find_cliques</span><span class="p">(</span><span class="n">g_geom_match</span><span class="p">):</span>
+        <span class="n">n_clique_nodes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">clique_nodes</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">n_clique_nodes</span> <span class="o">&lt;</span> <span class="mi">4</span><span class="p">:</span>
+            <span class="k">continue</span>
+
+        <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Checking clique </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">clique_nodes</span><span class="p">))</span>
+
+        <span class="n">out</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">get_slot_id_candidates</span><span class="p">(</span><span class="n">g_geom_match</span><span class="p">,</span> <span class="n">clique_nodes</span><span class="p">))</span>
+
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s1">&#39;Done with graph matching&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span></div>
+
+
+<div class="viewcode-block" id="find_all_matching_agasc_ids"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.find_all_matching_agasc_ids">[docs]</a><span class="k">def</span> <span class="nf">find_all_matching_agasc_ids</span><span class="p">(</span><span class="n">yags</span><span class="p">,</span> <span class="n">zags</span><span class="p">,</span> <span class="n">mags</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">agasc_pairs_file</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">dist_match_graph</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                <span class="n">tolerance</span><span class="o">=</span><span class="mf">2.5</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Given an input table of ``stars`` find the matching cliques (completely connected</span>
+<span class="sd">    subgraphs) in the ``agasc_pairs_file`` of pair distances.  Do pair distance matching</span>
+<span class="sd">    to within ``tolerance`` arcsec.</span>
+
+<span class="sd">    If ``g_dist_match`` is supplied then skip over reading the AGASC pairs and doing</span>
+<span class="sd">    initial matching.  This is mostly for development.</span>
+
+<span class="sd">    :param stars: table of up to 8 stars</span>
+<span class="sd">    :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py</span>
+<span class="sd">    :param dist_match_graph: graph with matching distances (optional, for development)</span>
+<span class="sd">    :param tolerance: distance matching tolerance (arcsec)</span>
+
+<span class="sd">    :returns: list of possible AGASC-ID to star index maps</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stars</span> <span class="o">=</span> <span class="n">get_dists_yag_zag</span><span class="p">(</span><span class="n">yags</span><span class="p">,</span> <span class="n">zags</span><span class="p">,</span> <span class="n">mags</span><span class="p">)</span>
+    <span class="n">agasc_id_star_maps</span> <span class="o">=</span> <span class="n">find_matching_agasc_ids</span><span class="p">(</span><span class="n">stars</span><span class="p">,</span> <span class="n">agasc_pairs_file</span><span class="p">,</span>
+                                                 <span class="n">dist_match_graph</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="n">tolerance</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">agasc_id_star_maps</span></div>
+
+
+<div class="viewcode-block" id="find_attitude_for_agasc_ids"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.find_attitude_for_agasc_ids">[docs]</a><span class="k">def</span> <span class="nf">find_attitude_for_agasc_ids</span><span class="p">(</span><span class="n">yags</span><span class="p">,</span> <span class="n">zags</span><span class="p">,</span> <span class="n">agasc_id_star_map</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Find the fine attitude for a given set of yags and zags and a map of AGASC ID</span>
+<span class="sd">    to star index (i.e. index into ``yags`` and ``zags`` arrays).</span>
+
+<span class="sd">    Returns a dictionary with keys::</span>
+
+<span class="sd">      yags : input Y angles</span>
+<span class="sd">      zags : input Z angles</span>
+<span class="sd">      m_yags : best fit Y angles</span>
+<span class="sd">      m_zags : best fit Z angles</span>
+<span class="sd">      att_fit : best fit attitude quaternion (Quat object)</span>
+<span class="sd">      statval : final fit statistic</span>
+<span class="sd">      agasc_id_star_map : input AGASC ID to star index map</span>
+
+<span class="sd">    :returns: dict</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">yagzag</span>
+
+    <span class="kn">from</span> <span class="nn">sherpa</span> <span class="kn">import</span> <span class="n">ui</span>
+    <span class="kn">import</span> <span class="nn">agasc</span>
+    <span class="kn">from</span> <span class="nn">Quaternion</span> <span class="kn">import</span> <span class="n">Quat</span>
+    <span class="kn">from</span> <span class="nn">Ska.quatutil</span> <span class="kn">import</span> <span class="n">radec2yagzag</span>
+
+    <span class="c1"># Set sherpa logger to same level as local logger</span>
+    <span class="n">sherpa_logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;sherpa&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">hdlr</span> <span class="ow">in</span> <span class="n">sherpa_logger</span><span class="o">.</span><span class="n">handlers</span><span class="p">:</span>
+        <span class="n">sherpa_logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logger</span><span class="o">.</span><span class="n">level</span><span class="p">)</span>
+
+    <span class="n">star_indices</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">agasc_id_star_map</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">yags</span> <span class="o">=</span> <span class="n">yags</span><span class="p">[</span><span class="n">star_indices</span><span class="p">]</span>
+    <span class="n">zags</span> <span class="o">=</span> <span class="n">zags</span><span class="p">[</span><span class="n">star_indices</span><span class="p">]</span>
+
+    <span class="n">agasc_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">agasc_id_star_map</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="n">agasc_stars</span> <span class="o">=</span> <span class="p">[</span><span class="n">agasc</span><span class="o">.</span><span class="n">get_star</span><span class="p">(</span><span class="n">agasc_id</span><span class="p">)</span> <span class="k">for</span> <span class="n">agasc_id</span> <span class="ow">in</span> <span class="n">agasc_ids</span><span class="p">]</span>
+
+    <span class="n">ras</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;RA_PMCORR&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">agasc_stars</span><span class="p">]</span>
+    <span class="n">decs</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;DEC_PMCORR&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">agasc_stars</span><span class="p">]</span>
+
+    <span class="n">qatt</span> <span class="o">=</span> <span class="n">Quat</span><span class="p">([</span><span class="n">ras</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">decs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mf">0.0</span><span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">_yag_zag</span><span class="p">(</span><span class="n">dra</span><span class="p">,</span> <span class="n">ddec</span><span class="p">,</span> <span class="n">droll</span><span class="p">):</span>
+        <span class="n">q</span> <span class="o">=</span> <span class="n">qatt</span> <span class="o">*</span> <span class="n">Quat</span><span class="p">([</span><span class="n">dra</span> <span class="o">/</span> <span class="mf">3600.</span><span class="p">,</span> <span class="n">ddec</span> <span class="o">/</span> <span class="mf">3600.</span><span class="p">,</span> <span class="n">droll</span><span class="p">])</span>
+        <span class="n">yags</span><span class="p">,</span> <span class="n">zags</span> <span class="o">=</span> <span class="n">radec2yagzag</span><span class="p">(</span><span class="n">ras</span><span class="p">,</span> <span class="n">decs</span><span class="p">,</span> <span class="n">q</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">yags</span> <span class="o">*</span> <span class="mi">3600</span><span class="p">,</span> <span class="n">zags</span> <span class="o">*</span> <span class="mi">3600</span><span class="p">,</span> <span class="n">q</span>
+
+    <span class="k">def</span> <span class="nf">yag_zag</span><span class="p">(</span><span class="n">pars</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">m_yags</span><span class="p">,</span> <span class="n">m_zags</span><span class="p">,</span> <span class="n">q</span> <span class="o">=</span> <span class="n">_yag_zag</span><span class="p">(</span><span class="o">*</span><span class="n">pars</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">m_yags</span><span class="p">,</span> <span class="n">m_zags</span><span class="p">])</span>
+
+    <span class="n">m_yags</span><span class="p">,</span> <span class="n">m_zags</span><span class="p">,</span> <span class="n">att_fit</span> <span class="o">=</span> <span class="n">_yag_zag</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">stars</span> <span class="o">=</span> <span class="n">get_dists_yag_zag</span><span class="p">(</span><span class="n">yags</span><span class="p">,</span> <span class="n">zags</span><span class="p">)</span>
+    <span class="n">dists</span> <span class="o">=</span> <span class="n">stars</span><span class="p">[</span><span class="s1">&#39;dists&#39;</span><span class="p">]</span>
+    <span class="n">idx0</span> <span class="o">=</span> <span class="n">stars</span><span class="p">[</span><span class="s1">&#39;idx0&#39;</span><span class="p">]</span>
+    <span class="n">idx1</span> <span class="o">=</span> <span class="n">stars</span><span class="p">[</span><span class="s1">&#39;idx1&#39;</span><span class="p">]</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argmax</span><span class="p">(</span><span class="n">dists</span><span class="p">)</span>
+    <span class="n">m_ang</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">m_zags</span><span class="p">[</span><span class="n">idx0</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">-</span> <span class="n">m_zags</span><span class="p">[</span><span class="n">idx1</span><span class="p">[</span><span class="n">i</span><span class="p">]],</span> <span class="n">m_yags</span><span class="p">[</span><span class="n">idx0</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">-</span> <span class="n">m_yags</span><span class="p">[</span><span class="n">idx1</span><span class="p">[</span><span class="n">i</span><span class="p">]])</span>
+    <span class="n">s_ang</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arctan2</span><span class="p">(</span><span class="n">zags</span><span class="p">[</span><span class="n">idx0</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">-</span> <span class="n">zags</span><span class="p">[</span><span class="n">idx1</span><span class="p">[</span><span class="n">i</span><span class="p">]],</span> <span class="n">yags</span><span class="p">[</span><span class="n">idx0</span><span class="p">[</span><span class="n">i</span><span class="p">]]</span> <span class="o">-</span> <span class="n">yags</span><span class="p">[</span><span class="n">idx1</span><span class="p">[</span><span class="n">i</span><span class="p">]])</span>
+    <span class="n">roll</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">degrees</span><span class="p">(</span><span class="n">m_ang</span> <span class="o">-</span> <span class="n">s_ang</span><span class="p">)</span>
+
+    <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">yags</span><span class="p">,</span> <span class="n">zags</span><span class="p">])</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">load_arrays</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">)),</span> <span class="n">y</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">)))</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">load_user_model</span><span class="p">(</span><span class="n">yag_zag</span><span class="p">,</span> <span class="s2">&quot;yagzag&quot;</span><span class="p">)</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">add_user_pars</span><span class="p">(</span><span class="s2">&quot;yagzag&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;dra&quot;</span><span class="p">,</span> <span class="s2">&quot;ddec&quot;</span><span class="p">,</span> <span class="s2">&quot;droll&quot;</span><span class="p">])</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">set_model</span><span class="p">(</span><span class="n">yagzag</span><span class="p">)</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">set_method</span><span class="p">(</span><span class="s1">&#39;simplex&#39;</span><span class="p">)</span>
+
+    <span class="n">yagzag</span><span class="o">.</span><span class="n">dra</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">yagzag</span><span class="o">.</span><span class="n">ddec</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">yagzag</span><span class="o">.</span><span class="n">droll</span> <span class="o">=</span> <span class="n">roll</span>
+
+    <span class="n">ui</span><span class="o">.</span><span class="n">freeze</span><span class="p">(</span><span class="n">yagzag</span><span class="o">.</span><span class="n">droll</span><span class="p">)</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">fit</span><span class="p">()</span>
+
+    <span class="n">ui</span><span class="o">.</span><span class="n">thaw</span><span class="p">(</span><span class="n">yagzag</span><span class="o">.</span><span class="n">droll</span><span class="p">)</span>
+    <span class="n">ui</span><span class="o">.</span><span class="n">fit</span><span class="p">()</span>
+    <span class="n">fit_results</span> <span class="o">=</span> <span class="n">ui</span><span class="o">.</span><span class="n">get_fit_results</span><span class="p">()</span>
+    <span class="n">m_yags</span><span class="p">,</span> <span class="n">m_zags</span><span class="p">,</span> <span class="n">att_fit</span> <span class="o">=</span> <span class="n">_yag_zag</span><span class="p">(</span><span class="n">yagzag</span><span class="o">.</span><span class="n">dra</span><span class="o">.</span><span class="n">val</span><span class="p">,</span> <span class="n">yagzag</span><span class="o">.</span><span class="n">ddec</span><span class="o">.</span><span class="n">val</span><span class="p">,</span> <span class="n">yagzag</span><span class="o">.</span><span class="n">droll</span><span class="o">.</span><span class="n">val</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">yags</span><span class="o">=</span><span class="n">yags</span><span class="p">,</span>
+               <span class="n">zags</span><span class="o">=</span><span class="n">zags</span><span class="p">,</span>
+               <span class="n">m_yags</span><span class="o">=</span><span class="n">m_yags</span><span class="p">,</span>
+               <span class="n">m_zags</span><span class="o">=</span><span class="n">m_zags</span><span class="p">,</span>
+               <span class="n">att_fit</span><span class="o">=</span><span class="n">att_fit</span><span class="p">,</span>
+               <span class="n">statval</span><span class="o">=</span><span class="n">fit_results</span><span class="o">.</span><span class="n">statval</span><span class="p">,</span>
+               <span class="n">agasc_id_star_map</span><span class="o">=</span><span class="n">agasc_id_star_map</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">out</span></div>
+
+
+<div class="viewcode-block" id="find_attitude_solutions"><a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.find_attitude_solutions">[docs]</a><span class="k">def</span> <span class="nf">find_attitude_solutions</span><span class="p">(</span><span class="n">stars</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">2.5</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Find attitude solutions given an input table of star data.</span>
+
+<span class="sd">    The input star table must have columns &#39;YAG&#39; (arcsec), &#39;ZAG&#39; (arcsec), and</span>
+<span class="sd">    &#39;MAG&#39;.  There must be at least four stars for the matching algorithm to succeed.</span>
+
+<span class="sd">    The output is a list of solutions, where each solution is a dict with keys::</span>
+
+<span class="sd">      summary : copy of input stars table with new columns of useful info</span>
+<span class="sd">      yags : input Y angles</span>
+<span class="sd">      zags : input Z angles</span>
+<span class="sd">      m_yags : best fit Y angles</span>
+<span class="sd">      m_zags : best fit Z angles</span>
+<span class="sd">      agasc_ids : list of AGASC IDs corresponding to inputs</span>
+<span class="sd">      att_fit : best fit attitude quaternion (Quat object)</span>
+<span class="sd">      statval : final fit statistic</span>
+<span class="sd">      agasc_id_star_map : input AGASC ID to star index map</span>
+
+<span class="sd">    :param stars: table of star data</span>
+<span class="sd">    :param tolerance: matching tolerance (arcsec, default=2.5)</span>
+
+<span class="sd">    :returns: list of solutions, where each solution is a dict</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">stars</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">4</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;need at least 4 stars for matching, only </span><span class="si">{}</span><span class="s1"> were provided&#39;</span>
+                         <span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">stars</span><span class="p">)))</span>
+
+    <span class="n">agasc_id_star_maps</span> <span class="o">=</span> <span class="n">find_all_matching_agasc_ids</span><span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;YAG&#39;</span><span class="p">],</span> <span class="n">stars</span><span class="p">[</span><span class="s1">&#39;ZAG&#39;</span><span class="p">],</span> <span class="n">stars</span><span class="p">[</span><span class="s1">&#39;MAG_ACA&#39;</span><span class="p">],</span>
+                                                     <span class="n">agasc_pairs_file</span><span class="o">=</span><span class="n">AGASC_PAIRS_FILE</span><span class="p">,</span>
+                                                     <span class="n">tolerance</span><span class="o">=</span><span class="n">tolerance</span><span class="p">)</span>
+
+    <span class="n">solutions</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">agasc_id_star_map</span> <span class="ow">in</span> <span class="n">agasc_id_star_maps</span><span class="p">:</span>
+        <span class="n">solution</span> <span class="o">=</span> <span class="n">find_attitude_for_agasc_ids</span><span class="p">(</span><span class="n">stars</span><span class="p">[</span><span class="s1">&#39;YAG&#39;</span><span class="p">],</span> <span class="n">stars</span><span class="p">[</span><span class="s1">&#39;ZAG&#39;</span><span class="p">],</span> <span class="n">agasc_id_star_map</span><span class="p">)</span>
+
+        <span class="c1"># Check to see if there is another solution that has overlapping</span>
+        <span class="c1"># stars.  If there are overlaps and this solution has a lower</span>
+        <span class="c1"># fit statistic then use this solution.</span>
+        <span class="n">agasc_ids</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">agasc_id_star_map</span><span class="p">)</span>
+        <span class="n">solution</span><span class="p">[</span><span class="s1">&#39;agasc_ids&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">agasc_ids</span>
+        <span class="k">for</span> <span class="n">prev_solution</span> <span class="ow">in</span> <span class="n">solutions</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">agasc_ids</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">prev_solution</span><span class="p">[</span><span class="s1">&#39;agasc_ids&#39;</span><span class="p">]):</span>
+                <span class="k">if</span> <span class="n">solution</span><span class="p">[</span><span class="s1">&#39;statval&#39;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">prev_solution</span><span class="p">[</span><span class="s1">&#39;statval&#39;</span><span class="p">]:</span>
+                    <span class="n">prev_solution</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">solution</span><span class="p">)</span>
+                <span class="k">break</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">solutions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">solution</span><span class="p">)</span>
+
+    <span class="n">_update_solutions</span><span class="p">(</span><span class="n">solutions</span><span class="p">,</span> <span class="n">stars</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">solutions</span></div>
+
+
+<span class="k">def</span> <span class="nf">_update_solutions</span><span class="p">(</span><span class="n">solutions</span><span class="p">,</span> <span class="n">stars</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">sol</span> <span class="ow">in</span> <span class="n">solutions</span><span class="p">:</span>
+        <span class="n">summ</span> <span class="o">=</span> <span class="n">Table</span><span class="p">(</span><span class="n">stars</span><span class="p">,</span> <span class="n">masked</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="n">indices</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">sol</span><span class="p">[</span><span class="s1">&#39;agasc_id_star_map&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;m_yag&#39;</span><span class="p">,</span> <span class="s1">&#39;dy&#39;</span><span class="p">,</span> <span class="s1">&#39;m_zag&#39;</span><span class="p">,</span> <span class="s1">&#39;dz&#39;</span><span class="p">,</span> <span class="s1">&#39;dr&#39;</span><span class="p">):</span>
+            <span class="n">summ</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">MaskedColumn</span><span class="p">([</span><span class="o">-</span><span class="mf">99.0</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">summ</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;m_agasc_id&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MaskedColumn</span><span class="p">([</span><span class="o">-</span><span class="mi">99</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">summ</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;m_agasc_id&#39;</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;m_yag&#39;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;m_yags&#39;</span><span class="p">]</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;dy&#39;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;yags&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;m_yags&#39;</span><span class="p">]</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;m_zag&#39;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;m_zags&#39;</span><span class="p">]</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;dz&#39;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;zags&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;m_zags&#39;</span><span class="p">]</span>
+        <span class="n">dr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">sol</span><span class="p">[</span><span class="s1">&#39;yags&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;m_yags&#39;</span><span class="p">])</span> <span class="o">**</span> <span class="mi">2</span>
+                     <span class="o">+</span> <span class="p">(</span><span class="n">sol</span><span class="p">[</span><span class="s1">&#39;zags&#39;</span><span class="p">]</span> <span class="o">-</span> <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;m_zags&#39;</span><span class="p">])</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;dr&#39;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">dr</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s1">&#39;m_agasc_id&#39;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">sol</span><span class="p">[</span><span class="s1">&#39;agasc_id_star_map&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">summ</span><span class="o">.</span><span class="n">colnames</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;RA&#39;</span><span class="p">,</span> <span class="s1">&#39;DEC&#39;</span><span class="p">):</span>
+                <span class="nb">format</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{:.4f}</span><span class="s1">&#39;</span>
+            <span class="k">elif</span> <span class="s1">&#39;agasc&#39;</span> <span class="ow">in</span> <span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+                <span class="nb">format</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{:d}</span><span class="s1">&#39;</span>
+            <span class="k">elif</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;m_yag&#39;</span><span class="p">,</span> <span class="s1">&#39;dy&#39;</span><span class="p">,</span> <span class="s1">&#39;m_zag&#39;</span><span class="p">,</span> <span class="s1">&#39;dz&#39;</span><span class="p">,</span> <span class="s1">&#39;dr&#39;</span><span class="p">):</span>
+                <span class="nb">format</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{:.2f}</span><span class="s1">&#39;</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="nb">format</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">if</span> <span class="nb">format</span><span class="p">:</span>
+                <span class="n">summ</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">format</span> <span class="o">=</span> <span class="nb">format</span>
+        <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;summary&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">summ</span>
+
+        <span class="c1"># Need at least 4 stars with radial fit residual &lt; 3 arcsec</span>
+        <span class="n">sol</span><span class="p">[</span><span class="s1">&#39;bad_fit&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dr</span> <span class="o">&lt;</span> <span class="mf">3.0</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">4</span>
+</pre></div>
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><h3>Page Contents</h3>
+
+
+<form action="../../search.html" method="get">
+  <input type="text" name="q" placeholder="Search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+<footer class="footer">
+  <p class="pull-right"> &nbsp;
+    <a href="#">Back to Top</a></p>
+  <p>
+    &copy; Copyright 2015, Tom Aldcroft.<br/>
+    Created using <a href="http://www.sphinx-doc.org/en/stable/">Sphinx</a> 3.1.2. &nbsp;
+  </p>
+</footer>
+  </body>
+</html>
