@@ -402,7 +402,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
         logger.debug('g_geom_match: ')
         for n0, n1 in nx.edges(g_geom_match):
             ed = g_geom_match.get_edge_data(n0, n1)
-            logger.debug(n0, n1, ed)
+            logger.debug(f'{n0=} {n1=} {ed=}')
 
     out = []
 
