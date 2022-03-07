@@ -4,16 +4,16 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Find_attitude package documentation &#8212; find_attitude 3.4.0 documentation</title>
-    <link rel="stylesheet" href="_static/bootstrap-astropy.css" type="text/css" />
-    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Find_attitude package documentation &#8212; find_attitude 3.4.1 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-astropy.css" />
     
-    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
     <script src="_static/jquery.js"></script>
     <script src="_static/underscore.js"></script>
     <script src="_static/doctools.js"></script>
-    <script src="_static/language_data.js"></script>
     <script type="text/javascript" src="_static/sidebar.js"></script>
     <script type="text/javascript" src="_static/copybutton.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
@@ -47,7 +47,7 @@
     <h3>Navigation</h3>
     <ul>
       <li>
-	<a href="#">find_attitude 3.4.0 documentation</a>
+	<a href="#">find_attitude 3.4.1 documentation</a>
 	 &#187;
       </li>
       
@@ -61,7 +61,7 @@
         <div class="bodywrapper">
           <div class="body" role="main">
             
-  <div class="section" id="find-attitude-package-documentation">
+  <section id="find-attitude-package-documentation">
 <h1>Find_attitude package documentation<a class="headerlink" href="#find-attitude-package-documentation" title="Permalink to this headline">¶</a></h1>
 <p>The <code class="docutils literal notranslate"><span class="pre">find_atitude</span></code> package contains functions for determining Chandra fine-attitude
 based only on the observed Y-angle, Z-angle, and magnitude of at least four ACA guide
@@ -69,11 +69,11 @@ stars.</p>
 <p>The recommended way for use of this in an operational situation is via the Kadi web site
 front end at <a class="reference external" href="http://kadi.cfa.harvard.edu/find_attitude">http://kadi.cfa.harvard.edu/find_attitude</a>.  This requires being on the CfA
 network via VPN.</p>
-<div class="section" id="module-find_attitude.find_attitude">
+<section id="module-find_attitude.find_attitude">
 <span id="api-docs"></span><h2>API docs<a class="headerlink" href="#module-find_attitude.find_attitude" title="Permalink to this headline">¶</a></h2>
 <dl class="py function">
-<dt id="find_attitude.find_attitude.add_edge">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">add_edge</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">graph</span></em>, <em class="sig-param"><span class="n">id0</span></em>, <em class="sig-param"><span class="n">id1</span></em>, <em class="sig-param"><span class="n">i0</span></em>, <em class="sig-param"><span class="n">i1</span></em>, <em class="sig-param"><span class="n">dist</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#add_edge"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.add_edge" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.add_edge">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">add_edge</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">graph</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">id1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">i0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">i1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dist</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#add_edge"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.add_edge" title="Permalink to this definition">¶</a></dt>
 <dd><p>Add an edge to the graph including metdata values <code class="docutils literal notranslate"><span class="pre">i0</span></code>, <code class="docutils literal notranslate"><span class="pre">i1</span></code> and <code class="docutils literal notranslate"><span class="pre">dist</span></code>.
 <code class="docutils literal notranslate"><span class="pre">id0</span></code> and <code class="docutils literal notranslate"><span class="pre">id1</span></code> are the AGASC (and node) ID of the edge that gets inserted.</p>
 <p>The <code class="docutils literal notranslate"><span class="pre">i0</span></code>, <code class="docutils literal notranslate"><span class="pre">i1</span></code> index values represent the index into the ACA stars catalog
@@ -100,8 +100,8 @@ id0 &lt;=&gt; i0 or id0 &lt;=&gt; i1 (or none of the above).</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.connected_agasc_ids">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">connected_agasc_ids</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">ap</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#connected_agasc_ids"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.connected_agasc_ids" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.connected_agasc_ids">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">connected_agasc_ids</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ap</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#connected_agasc_ids"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.connected_agasc_ids" title="Permalink to this definition">¶</a></dt>
 <dd><p>Return agacs_ids that occur at least 4 times.  Each occurrence indicates
 an edge containing that agasc_id node.</p>
 <dl class="field-list simple">
@@ -115,8 +115,8 @@ an edge containing that agasc_id node.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.find_all_matching_agasc_ids">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">find_all_matching_agasc_ids</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">yags</span></em>, <em class="sig-param"><span class="n">zags</span></em>, <em class="sig-param"><span class="n">mags</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">agasc_pairs_file</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">dist_match_graph</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">tolerance</span><span class="o">=</span><span class="default_value">2.5</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_all_matching_agasc_ids"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.find_all_matching_agasc_ids" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.find_all_matching_agasc_ids">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">find_all_matching_agasc_ids</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">yags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mags</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agasc_pairs_file</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dist_match_graph</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tolerance</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2.5</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_all_matching_agasc_ids"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.find_all_matching_agasc_ids" title="Permalink to this definition">¶</a></dt>
 <dd><p>Given an input table of <code class="docutils literal notranslate"><span class="pre">stars</span></code> find the matching cliques (completely connected
 subgraphs) in the <code class="docutils literal notranslate"><span class="pre">agasc_pairs_file</span></code> of pair distances.  Do pair distance matching
 to within <code class="docutils literal notranslate"><span class="pre">tolerance</span></code> arcsec.</p>
@@ -138,8 +138,8 @@ initial matching.  This is mostly for development.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.find_attitude_for_agasc_ids">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">find_attitude_for_agasc_ids</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">yags</span></em>, <em class="sig-param"><span class="n">zags</span></em>, <em class="sig-param"><span class="n">agasc_id_star_map</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_attitude_for_agasc_ids"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.find_attitude_for_agasc_ids" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.find_attitude_for_agasc_ids">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">find_attitude_for_agasc_ids</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">yags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agasc_id_star_map</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_attitude_for_agasc_ids"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.find_attitude_for_agasc_ids" title="Permalink to this definition">¶</a></dt>
 <dd><p>Find the fine attitude for a given set of yags and zags and a map of AGASC ID
 to star index (i.e. index into <code class="docutils literal notranslate"><span class="pre">yags</span></code> and <code class="docutils literal notranslate"><span class="pre">zags</span></code> arrays).</p>
 <p>Returns a dictionary with keys:</p>
@@ -160,8 +160,8 @@ to star index (i.e. index into <code class="docutils literal notranslate"><span 
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.find_attitude_solutions">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">find_attitude_solutions</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">stars</span></em>, <em class="sig-param"><span class="n">tolerance</span><span class="o">=</span><span class="default_value">2.5</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_attitude_solutions"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.find_attitude_solutions" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.find_attitude_solutions">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">find_attitude_solutions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stars</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tolerance</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2.5</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_attitude_solutions"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.find_attitude_solutions" title="Permalink to this definition">¶</a></dt>
 <dd><p>Find attitude solutions given an input table of star data.</p>
 <p>The input star table must have columns ‘YAG’ (arcsec), ‘ZAG’ (arcsec), and
 ‘MAG’.  There must be at least four stars for the matching algorithm to succeed.</p>
@@ -191,8 +191,8 @@ to star index (i.e. index into <code class="docutils literal notranslate"><span 
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.find_matching_agasc_ids">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">find_matching_agasc_ids</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">stars</span></em>, <em class="sig-param"><span class="n">agasc_pairs_file</span></em>, <em class="sig-param"><span class="n">g_dist_match</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">tolerance</span><span class="o">=</span><span class="default_value">2.5</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_matching_agasc_ids"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.find_matching_agasc_ids" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.find_matching_agasc_ids">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">find_matching_agasc_ids</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stars</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agasc_pairs_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">g_dist_match</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tolerance</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">2.5</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#find_matching_agasc_ids"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.find_matching_agasc_ids" title="Permalink to this definition">¶</a></dt>
 <dd><p>Given an input table of <code class="docutils literal notranslate"><span class="pre">stars</span></code> find the matching cliques (completely connected
 subgraphs) in the <code class="docutils literal notranslate"><span class="pre">agasc_pairs_file</span></code> of pair distances.  Do pair distance matching
 to within <code class="docutils literal notranslate"><span class="pre">tolerance</span></code> arcsec.</p>
@@ -218,8 +218,8 @@ initial matching.  This is mostly for development.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.get_dists_yag_zag">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">get_dists_yag_zag</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">yags</span></em>, <em class="sig-param"><span class="n">zags</span></em>, <em class="sig-param"><span class="n">mags</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_dists_yag_zag"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.get_dists_yag_zag" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.get_dists_yag_zag">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">get_dists_yag_zag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">yags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mags</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_dists_yag_zag"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.get_dists_yag_zag" title="Permalink to this definition">¶</a></dt>
 <dd><p>Get distances between every pair of stars with coordinates <code class="docutils literal notranslate"><span class="pre">yags</span></code> and
 <code class="docutils literal notranslate"><span class="pre">zags</span></code>.  Returns a Table with columns ‘dists’, ‘idx0’, ‘idx1’, ‘mag0’, ‘mag1’.</p>
 <dl class="field-list simple">
@@ -237,8 +237,8 @@ initial matching.  This is mostly for development.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.get_match_graph">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">get_match_graph</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">aca_pairs</span></em>, <em class="sig-param"><span class="n">agasc_pairs</span></em>, <em class="sig-param"><span class="n">tolerance</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_match_graph"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.get_match_graph" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.get_match_graph">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">get_match_graph</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">aca_pairs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">agasc_pairs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tolerance</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_match_graph"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.get_match_graph" title="Permalink to this definition">¶</a></dt>
 <dd><p>Given a table of <code class="docutils literal notranslate"><span class="pre">aca_pairs</span></code> representing the distance between every pair in the
 observed ACA centroid data, and the table of AGASC catalog pairs, assemble a network
 graph of all AGASC pairs that correspond to an ACA pair.</p>
@@ -258,8 +258,8 @@ graph of all AGASC pairs that correspond to an ACA pair.</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.get_slot_id_candidates">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">get_slot_id_candidates</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">graph</span></em>, <em class="sig-param"><span class="n">nodes</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_slot_id_candidates"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.get_slot_id_candidates" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.get_slot_id_candidates">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">get_slot_id_candidates</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">graph</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nodes</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_slot_id_candidates"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.get_slot_id_candidates" title="Permalink to this definition">¶</a></dt>
 <dd><p>For a <code class="docutils literal notranslate"><span class="pre">graph</span></code> of nodes / edges that match the stars in distance, and a list of
 <code class="docutils literal notranslate"><span class="pre">clique_nodes</span></code> which form a complete subgraph, find a list of identification
 candidates which map node AGASC ID to ACA star catalog index number.  This handles
@@ -283,8 +283,8 @@ making graphs).</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.get_stars_from_text">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">get_stars_from_text</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">text</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_stars_from_text"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.get_stars_from_text" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.get_stars_from_text">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">get_stars_from_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">text</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_stars_from_text"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.get_stars_from_text" title="Permalink to this definition">¶</a></dt>
 <dd><p>Get stars table from <code class="docutils literal notranslate"><span class="pre">text</span></code> input which can be a hand-entered table
 or copy/paste from GRETA A_ACA_ALL.  Minimal conforming examples are:</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span> <span class="n">MEAS</span>      <span class="c1">#   Flags   Functn  Flag        Y         Z        Mag</span>
@@ -318,8 +318,8 @@ or copy/paste from GRETA A_ACA_ALL.  Minimal conforming examples are:</p>
 </dd></dl>
 
 <dl class="py function">
-<dt id="find_attitude.find_attitude.get_triangles">
-<code class="sig-prename descclassname">find_attitude.find_attitude.</code><code class="sig-name descname">get_triangles</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">G</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_triangles"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#find_attitude.find_attitude.get_triangles" title="Permalink to this definition">¶</a></dt>
+<dt class="sig sig-object py" id="find_attitude.find_attitude.get_triangles">
+<span class="sig-prename descclassname"><span class="pre">find_attitude.find_attitude.</span></span><span class="sig-name descname"><span class="pre">get_triangles</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">G</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/find_attitude/find_attitude.html#get_triangles"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#find_attitude.find_attitude.get_triangles" title="Permalink to this definition">¶</a></dt>
 <dd><p>Get all the triangles in graph <code class="docutils literal notranslate"><span class="pre">G</span></code></p>
 <p>This code was taken from a google forum discussion posting by Daniel Schult.
 No license or attribution request was provided.
@@ -334,8 +334,8 @@ No license or attribution request was provided.
 </dl>
 </dd></dl>
 
-</div>
-</div>
+</section>
+</section>
 
 
             <div class="clearer"></div>
@@ -375,7 +375,7 @@ No license or attribution request was provided.
     <a href="#">Back to Top</a></p>
   <p>
     &copy; Copyright 2015, Tom Aldcroft.<br/>
-    Created using <a href="http://www.sphinx-doc.org/en/stable/">Sphinx</a> 3.1.2. &nbsp;
+    Created using <a href="http://www.sphinx-doc.org/en/stable/">Sphinx</a> 4.2.0. &nbsp;
   </p>
 </footer>
   </body>
