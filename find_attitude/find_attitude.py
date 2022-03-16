@@ -464,6 +464,13 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     """
     global yagzag
 
+    # Squelch the useless warning below prior to import. Since this application
+    # does not dealing with image data we don't worry about silencing these.
+    # WARNING: imaging routines will not be available,
+    # failed to import sherpa.image.ds9_backend due to
+    # 'RuntimeErr: DS9Win unusable: Could not find ds9 on your PATH'
+    logging.getLogger('sherpa.image').setLevel(logging.ERROR)
+
     from sherpa import ui
     import agasc
     from Quaternion import Quat
