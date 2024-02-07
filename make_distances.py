@@ -2,14 +2,13 @@
 import os
 from itertools import izip
 
-import tables
+import astropy.healpix as hp
+import matplotlib.pyplot as plt
 import numpy as np
+import tables
+from agasc import get_star, sphere_dist
 from astropy.table import Table, vstack
 from Chandra.Time import DateTime
-import healpy as hp
-from agasc import sphere_dist, get_star
-import matplotlib.pyplot as plt
-
 
 NSIDE = 16
 MIN_ACA_DIST = 25.0 / 3600  # 25 arcmin min separation
@@ -123,9 +122,7 @@ def get_dists_for_region(agasc, ipix):
         get_stars_for_region(agasc, ipix_neighbor) for ipix_neighbor in ipix_neighbors
     ]
 
-    t_list = []
-    for s1 in [s0] + s1s:
-        t_list.append(_get_dists(s0, s1))
+    t_list = [_get_dists(s0, s1) for s1 in [s0] + s1s]
     out = vstack(t_list)
     return out
 
@@ -148,7 +145,7 @@ def get_all_dists(agasc=None):
     if agasc is None:
         agasc = get_microagasc()
     t_list = []
-    for ipix in xrange(hp.nside2npix(NSIDE)):
+    for ipix in range(hp.nside2npix(NSIDE)):
         print(ipix)
         t_list.append(get_dists_for_region(agasc, ipix))
 

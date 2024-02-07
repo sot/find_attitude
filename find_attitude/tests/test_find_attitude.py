@@ -1,16 +1,17 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import print_function, division
+from __future__ import division, print_function
 
 from pprint import pprint
 
-import numpy as np
 import agasc
-from Ska.quatutil import radec2yagzag
-from Quaternion import Quat
+import numpy as np
 from astropy.io import ascii
+from Quaternion import Quat
+from Ska.quatutil import radec2yagzag
+
 from find_attitude.find_attitude import (
-    get_dists_yag_zag,
     find_attitude_solutions,
+    get_dists_yag_zag,
     get_stars_from_text,
 )
 
@@ -19,11 +20,13 @@ def get_stars(
     ra=119.98,
     dec=-78,
     roll=0,
-    select=slice(None, 8),
+    select=None,
     brightest=True,
     sigma_1axis=0.4,
     sigma_mag=0.2,
 ):
+    if select is None:
+        select = slice(None, 8)
     stars = agasc.get_agasc_cone(ra, dec, 1.0)
     ok = (stars["MAG_ACA"] > 5) & (stars["ASPQ1"] == 0) & (stars["MAG_ACA"] < 10.5)
     stars = stars[ok]
@@ -252,9 +255,9 @@ def test_get_stars_from_table():
 
 
 def check_at_time(time, qatt=None):
-    from Ska.engarchive import fetch
-    from Chandra.Time import DateTime
     from astropy.table import Table
+    from Chandra.Time import DateTime
+    from Ska.engarchive import fetch
 
     msids_all = []
     msids = {}

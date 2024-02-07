@@ -1,17 +1,15 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-import os
 import collections
-from itertools import product
 import logging
+import os
+from itertools import product
 
-from six.moves import zip, range
-
-from ska_path import ska_path
 import numpy as np
-from astropy.table import Table, vstack, Column, MaskedColumn
-from astropy.io import ascii
-import tables
 import pyyaks.logger
+import tables
+from astropy.io import ascii
+from astropy.table import Column, MaskedColumn, Table, vstack
+from ska_path import ska_path
 
 try:
     import networkx as nx
@@ -39,9 +37,10 @@ logger = pyyaks.logger.get_logger(
 
 
 def get_stars_from_text(text):
-    """
-    Get stars table from ``text`` input which can be a hand-entered table
-    or copy/paste from GRETA A_ACA_ALL.  Minimal conforming examples are::
+    """Get stars table from ``text`` input.
+
+    This can be a hand-entered table or copy/paste from GRETA A_ACA_ALL.  Minimal
+    conforming examples are::
 
        MEAS      #   Flags   Functn  Flag        Y         Z        Mag
       IMAGE 0  0     STAR    TRAK   STAR     -381.28    1479.95      7.2
@@ -91,7 +90,7 @@ def get_stars_from_text(text):
                 names=["slot", "type", "function", "fid", "YAG", "ZAG", "MAG_ACA"],
             )
         except Exception as err:
-            raise ValueError("Could not parse input: {}".format(str(err)))
+            raise ValueError("Could not parse input: {}".format(str(err))) from None
         ok = (
             (stars["type"] == "STAR")
             & (stars["function"] == "TRAK")
@@ -105,7 +104,7 @@ def get_stars_from_text(text):
         try:
             stars = ascii.read(text, format="basic", delimiter=" ", guess=False)
         except Exception as err:
-            raise ValueError("Could not parse input: {}".format(str(err)))
+            raise ValueError("Could not parse input: {}".format(str(err))) from None
 
         colnames = ["slot", "yag", "zag", "mag"]
         if not set(stars.colnames).issuperset(colnames):
@@ -113,7 +112,7 @@ def get_stars_from_text(text):
                 "Found column names {} in input but need column names {}".format(
                     stars.colnames, colnames
                 )
-            )
+            ) from None
         stars.rename_column("yag", "YAG")
         stars.rename_column("zag", "ZAG")
         stars.rename_column("mag", "MAG_ACA")
@@ -123,9 +122,9 @@ def get_stars_from_text(text):
 
 
 def get_dists_yag_zag(yags, zags, mags=None):
-    """
-    Get distances between every pair of stars with coordinates ``yags`` and
-    ``zags``.  Returns a Table with columns 'dists', 'idx0', 'idx1', 'mag0', 'mag1'.
+    """Get distances between every pair of stars with coordinates ``yags`` and ``zags``.
+
+    Returns a Table with columns 'dists', 'idx0', 'idx1', 'mag0', 'mag1'.
 
     :param yags: np.array with star Y angles in arcsec
     :param zags: np.array with star Z angles in arcsec
@@ -189,8 +188,8 @@ def get_triangles(G):
 
 
 def add_edge(graph, id0, id1, i0, i1, dist):
-    """
-    Add an edge to the graph including metdata values ``i0``, ``i1`` and ``dist``.
+    """Add an edge to the graph including metdata values ``i0``, ``i1`` and ``dist``.
+
     ``id0`` and ``id1`` are the AGASC (and node) ID of the edge that gets inserted.
 
     The ``i0``, ``i1`` index values represent the index into the ACA stars catalog
@@ -217,9 +216,9 @@ def add_edge(graph, id0, id1, i0, i1, dist):
         graph.add_edge(id0, id1, i0=[i0], i1=[i1], dist=dist)
     else:
         edge = graph[id0][id1]
-        snew = set([i0, i1])
+        snew = {i0, i1}
         for i0_old, i1_old in zip(edge["i0"], edge["i1"]):
-            sold = set([i0_old, i1_old])
+            sold = {i0_old, i1_old}
             if snew == sold:
                 return
         edge["i0"].append(i0)
@@ -227,9 +226,9 @@ def add_edge(graph, id0, id1, i0, i1, dist):
 
 
 def connected_agasc_ids(ap):
-    """
-    Return agacs_ids that occur at least 4 times.  Each occurrence indicates
-    an edge containing that agasc_id node.
+    """Return agacs_ids that occur at least 4 times.
+
+    Each occurrence indicates an edge containing that agasc_id node.
 
     :param ap: table of AGASC pairs
     :returns: set of AGASC IDs
@@ -244,7 +243,8 @@ def connected_agasc_ids(ap):
 
 
 def get_match_graph(aca_pairs, agasc_pairs, tolerance):
-    """
+    """Return network graph of all AGASC pairs that correspond to an ACA pair.
+
     Given a table of ``aca_pairs`` representing the distance between every pair in the
     observed ACA centroid data, and the table of AGASC catalog pairs, assemble a network
     graph of all AGASC pairs that correspond to an ACA pair.
@@ -315,7 +315,8 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
 
 
 def get_slot_id_candidates(graph, nodes):
-    """
+    """Get list of candidates which map node AGASC ID to ACA star catalog index number.
+
     For a ``graph`` of nodes / edges that match the stars in distance, and a list of
     ``clique_nodes`` which form a complete subgraph, find a list of identification
     candidates which map node AGASC ID to ACA star catalog index number.  This handles
@@ -378,10 +379,10 @@ def get_slot_id_candidates(graph, nodes):
 
 
 def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5):
-    """
-    Given an input table of ``stars`` find the matching cliques (completely connected
-    subgraphs) in the ``agasc_pairs_file`` of pair distances.  Do pair distance matching
-    to within ``tolerance`` arcsec.
+    """Given an input table of ``stars`` find the matching cliques.
+
+    These cliques are completely connected subgraphs in the ``agasc_pairs_file`` of pair
+    distances.  Do pair distance matching to within ``tolerance`` arcsec.
 
     At a minimum the stars table should include the following columns::
 
@@ -421,7 +422,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
                 e1_i1 = e1["i1"][e1_i]
                 for e2_i, e2_i0 in enumerate(e2["i0"]):
                     e2_i1 = e2["i1"][e2_i]
-                    if len(set([e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1])) == 3:
+                    if len({e0_i0, e0_i1, e1_i0, e1_i1, e2_i0, e2_i1}) == 3:
                         add_edge(g_geom_match, tri[0], tri[1], e0_i0, e0_i1, e0["dist"])
                         add_edge(g_geom_match, tri[0], tri[2], e1_i0, e1_i1, e1["dist"])
                         add_edge(g_geom_match, tri[2], tri[1], e2_i0, e2_i1, e2["dist"])
@@ -452,10 +453,10 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
 def find_all_matching_agasc_ids(
     yags, zags, mags=None, agasc_pairs_file=None, dist_match_graph=None, tolerance=2.5
 ):
-    """
-    Given an input table of ``stars`` find the matching cliques (completely connected
-    subgraphs) in the ``agasc_pairs_file`` of pair distances.  Do pair distance matching
-    to within ``tolerance`` arcsec.
+    """Given an input table of ``stars`` find the matching cliques.
+
+    These cliques are completely connected subgraphs in the ``agasc_pairs_file`` of pair
+    distances.  Do pair distance matching to within ``tolerance`` arcsec.
 
     If ``g_dist_match`` is supplied then skip over reading the AGASC pairs and doing
     initial matching.  This is mostly for development.
@@ -475,7 +476,8 @@ def find_all_matching_agasc_ids(
 
 
 def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
-    """
+    """Find the fine attitude for the given inputs.
+
     Find the fine attitude for a given set of yags and zags and a map of AGASC ID
     to star index (i.e. index into ``yags`` and ``zags`` arrays).
 
@@ -492,7 +494,8 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     :returns: dict
 
     """
-    global yagzag
+    # Sherpa model global, leave this alone.
+    global yagzag  # noqa: PLW0602
 
     # Squelch the useless warning below prior to import. Since this application
     # does not dealing with image data we don't worry about silencing these.
@@ -501,14 +504,16 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     # 'RuntimeErr: DS9Win unusable: Could not find ds9 on your PATH'
     logging.getLogger("sherpa.image").setLevel(logging.ERROR)
 
-    from sherpa import ui
     import agasc
     from Quaternion import Quat
+    from sherpa import ui
     from Ska.quatutil import radec2yagzag
 
     # Set sherpa logger to same level as local logger
     sherpa_logger = logging.getLogger("sherpa")
-    for hdlr in sherpa_logger.handlers:
+    # FIXME: this looks like a bug in the original code. Either get rid of the loop or
+    # set levels for all handlers along with the sherpa_logger.
+    for _hdlr in sherpa_logger.handlers:
         sherpa_logger.setLevel(logger.level)
 
     star_indices = list(agasc_id_star_map.values())
@@ -528,7 +533,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
         yags, zags = radec2yagzag(ras, decs, q)
         return yags * 3600, zags * 3600, q
 
-    def yag_zag(pars, x):
+    def yag_zag(pars, x):  # noqa: ARG001
         m_yags, m_zags, q = _yag_zag(*pars)
         return np.concatenate([m_yags, m_zags])
 
@@ -566,15 +571,15 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
         yagzag.dra.val, yagzag.ddec.val, yagzag.droll.val
     )
 
-    out = dict(
-        yags=yags,
-        zags=zags,
-        m_yags=m_yags,
-        m_zags=m_zags,
-        att_fit=att_fit,
-        statval=fit_results.statval,
-        agasc_id_star_map=agasc_id_star_map,
-    )
+    out = {
+        "yags": yags,
+        "zags": zags,
+        "m_yags": m_yags,
+        "m_zags": m_zags,
+        "att_fit": att_fit,
+        "statval": fit_results.statval,
+        "agasc_id_star_map": agasc_id_star_map,
+    }
 
     return out
 

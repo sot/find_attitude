@@ -1,18 +1,21 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import os
-from django.shortcuts import render
+from logging import CRITICAL
 
+from django.shortcuts import render
 from kadi import __version__
+
 from find_attitude.find_attitude import (
-    get_stars_from_text,
     find_attitude_solutions,
+    get_stars_from_text,
     logger,
 )
-from logging import CRITICAL
 
 # Only emit critical messages
 logger.level = CRITICAL
-for hdlr in logger.handlers:
+# FIXME: this looks like a bug in the original code. Either get rid of the loop or
+# set levels for all handlers along with the logger.
+for _hdlr in logger.handlers:
     logger.setLevel(CRITICAL)
 
 
