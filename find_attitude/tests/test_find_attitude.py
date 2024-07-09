@@ -165,6 +165,7 @@ def check_output(solutions, stars, ra, dec, roll):
 
 
 def test_ra_dec_roll(
+    proseco_agasc_1p7,
     ra=115.770455413,
     dec=-77.6580358662,
     roll=86.4089128685,
