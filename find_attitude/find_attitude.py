@@ -3,20 +3,16 @@ import collections
 import logging
 import os
 from itertools import product
+from pathlib import Path
 
+import networkx as nx
 import numpy as np
-import pyyaks.logger
 import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
-from ska_path import ska_path
+from ska_helpers.logging import basic_logger
 
-try:
-    import networkx as nx
-except ImportError:
-    import warnings
-
-    warnings.warn("find_attitude could not import networkx")
+SKA = Path(os.environ["SKA"])
 
 DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
 
@@ -26,13 +22,13 @@ DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of ob
 try:
     AGASC_PAIRS_FILE = os.environ["AGASC_PAIRS_FILE"]
 except KeyError:
-    AGASC_PAIRS_FILE = ska_path(
-        "data", "find_attitude", "distances-kadi-local.h5"
-    ) or ska_path("data", "find_attitude", "distances.h5")
+    if (path := SKA / "data" / "find_attitude" / "distances-kadi-local.h5").exists():
+        AGASC_PAIRS_FILE = path
+    else:
+        AGASC_PAIRS_FILE = SKA / "data" / "find_attitude" / "distances.h5"
 
-loglevel = pyyaks.logger.INFO
-logger = pyyaks.logger.get_logger(
-    name="find_attitude", level=loglevel, format="%(asctime)s %(message)s"
+logger = basic_logger(
+    name="find_attitude", level="INFO", format="%(asctime)s %(message)s"
 )
 
 
@@ -269,7 +265,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
 
     logger.info("Getting matches from file")
     for i0, i1, dist, mag0, mag1 in zip(idx0s, idx1s, dists, mag0s, mag1s):
-        logger.verbose("Getting matches from file {} {} {}".format(i0, i1, dist))
+        logger.debug("Getting matches from file {} {} {}".format(i0, i1, dist))
         ap = agasc_pairs.read_where(
             "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
         )
@@ -286,7 +282,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
             names=["dists", "agasc_id0", "agasc_id1", "i0", "i1"],
         )
         ap_list.append(ap)
-        logger.verbose("  Found {} matching pairs".format(len(ap)))
+        logger.debug("  Found {} matching pairs".format(len(ap)))
 
     ap = vstack(
         ap_list
@@ -360,13 +356,13 @@ def get_slot_id_candidates(graph, nodes):
         try:
             agasc_id_star_index_map = {}
             for agasc_id, count_dict in node_star_index_count.items():
-                logger.verbose("AGASC ID {} has counts {}".format(agasc_id, count_dict))
+                logger.debug("AGASC ID {} has counts {}".format(agasc_id, count_dict))
                 for index, count in count_dict.items():
                     if count == n_nodes - 1:
                         agasc_id_star_index_map[agasc_id] = index
                         break
                 else:
-                    logger.verbose(
+                    logger.debug(
                         "  **** AGASC ID {} is incomplete **** ".format(agasc_id)
                     )
                     raise BadCandidateError
@@ -427,7 +423,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
                         add_edge(g_geom_match, tri[0], tri[2], e1_i0, e1_i1, e1["dist"])
                         add_edge(g_geom_match, tri[2], tri[1], e2_i0, e2_i1, e2["dist"])
 
-    if logger.level <= pyyaks.logger.DEBUG:
+    if logger.level <= logging.DEBUG:
         logger.debug("g_geom_match: ")
         for n0, n1 in nx.edges(g_geom_match):
             ed = g_geom_match.get_edge_data(n0, n1)

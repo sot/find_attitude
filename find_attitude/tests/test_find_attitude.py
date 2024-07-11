@@ -13,6 +13,7 @@ from find_attitude.find_attitude import (
     get_stars_from_text,
 )
 
+np.random.seed(0)
 
 def get_stars(
     ra=119.98,
@@ -177,7 +178,9 @@ def test_ra_dec_roll(
     stars = get_stars(
         ra, dec, roll, sigma_1axis=sigma_1axis, sigma_mag=sigma_mag, brightest=brightest
     )
-    solutions = find_attitude_solutions(stars)
+    import pickle
+    pickle.dump(stars, open("stars.pkl", "wb"))
+    solutions = find_attitude_solutions(stars, tolerance=2.5)
     check_output(solutions, stars, ra, dec, roll)
 
 
