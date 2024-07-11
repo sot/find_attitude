@@ -13,7 +13,6 @@ from find_attitude.find_attitude import (
     get_stars_from_text,
 )
 
-np.random.seed(0)
 
 def get_stars(
     ra=119.98,
@@ -24,6 +23,9 @@ def get_stars(
     sigma_1axis=0.4,
     sigma_mag=0.2,
 ):
+    # Make test results reproducible
+    np.random.seed(int(ra * 100 + dec * 10 + roll))
+
     if select is None:
         select = slice(None, 8)
     stars = agasc.get_agasc_cone(ra, dec, 1.0)
@@ -98,6 +100,7 @@ def test_overlapping_distances(tolerance=3.0):
 
 
 def _test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
+    np.random.seed(0)
     for _ in range(n_iter):
         global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
         ra = np.random.uniform(0, 360)
@@ -167,7 +170,7 @@ def check_output(solutions, stars, ra, dec, roll):
 
 def test_ra_dec_roll(
     ra=115.770455413,
-    dec=-77.6580358662,
+    dec=-75.6580358662,
     roll=86.4089128685,
     brightest=True,
     provide_mags=True,
@@ -178,8 +181,6 @@ def test_ra_dec_roll(
     stars = get_stars(
         ra, dec, roll, sigma_1axis=sigma_1axis, sigma_mag=sigma_mag, brightest=brightest
     )
-    import pickle
-    pickle.dump(stars, open("stars.pkl", "wb"))
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     check_output(solutions, stars, ra, dec, roll)
 
