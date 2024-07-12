@@ -344,7 +344,6 @@ def get_slot_id_candidates(graph, nodes):
 
     id_candidates = []
     for i0_id0s, i1_id1s in zip(product(*i0_id0s_list), product(*i1_id1s_list)):
-        logger.info("")
         node_star_index_count = collections.defaultdict(collections.Counter)
         for i0_id0, i1_id1 in zip(i0_id0s, i1_id1s):
             i0, id0 = i0_id0
@@ -669,6 +668,8 @@ def _update_solutions(solutions, stars):
             elif "agasc" in name.lower():
                 format = "{:d}"
             elif name in ("m_yag", "dy", "m_zag", "dz", "dr"):
+                format = "{:.2f}"
+            elif name in ("YAG", "YAG_ERR", "ZAG", "ZAG_ERR", "MAG_ACA", "MAG_ERROR"):
                 format = "{:.2f}"
             else:
                 format = None
