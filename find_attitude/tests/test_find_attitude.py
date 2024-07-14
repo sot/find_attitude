@@ -1,4 +1,5 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+import functools
 from pprint import pprint
 
 import agasc
@@ -11,9 +12,12 @@ from Ska.quatutil import radec2yagzag
 
 from find_attitude.find_attitude import (
     find_attitude_solutions,
+    get_agasc_pairs_attribute,
     get_dists_yag_zag,
     get_stars_from_text,
 )
+
+MAX_MAG = get_agasc_pairs_attribute("max_mag")
 
 
 def get_stars(
@@ -24,7 +28,6 @@ def get_stars(
     brightest=True,
     sigma_1axis=0.4,
     sigma_mag=0.2,
-    max_mag=10.5,
 ):
     # Make test results reproducible
     np.random.seed(int(ra * 100 + dec * 10 + roll))
@@ -33,7 +36,7 @@ def get_stars(
         select = slice(None, 8)
     agasc_file = agasc.get_agasc_filename("miniagasc_*")
     stars = agasc.get_agasc_cone(ra, dec, 1.0, date="2025:001", agasc_file=agasc_file)
-    stars = stars[stars["MAG_ACA"] < max_mag]
+    stars = stars[stars["MAG_ACA"] < MAX_MAG]
     remove_close_pairs(stars, radius=5 * u.arcsec, both=True)
     remove_close_pairs(stars, radius=25 * u.arcsec, both=False)
     stars = stars[stars["MAG_ACA"] > 5.0]
@@ -137,7 +140,7 @@ def test_overlapping_distances(tolerance=3.0):
 
 
 def _test_random(
-    n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True, max_mag=10.5
+    n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True
 ):
     np.random.seed(0)
     for _ in range(n_iter):
@@ -153,7 +156,6 @@ def _test_random(
             sigma_1axis=sigma_1axis,
             sigma_mag=sigma_mag,
             brightest=brightest,
-            max_mag=max_mag,
         )
         stars = stars[:n_stars]
         solutions = find_attitude_solutions(stars)
