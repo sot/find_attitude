@@ -129,9 +129,6 @@ def make_h5_file(dists, filename=DISTANCES_FILE):
     with tables.open_file(filename, mode="a", filters=filters) as h5:
         h5.root.data.cols.dists.create_index()
         h5.flush()
-        # Add a version attribute to the data group
-        h5.root.data._v_attrs.version = 1
-
 
 
 def main():
