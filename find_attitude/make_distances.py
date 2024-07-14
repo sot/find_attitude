@@ -14,7 +14,7 @@ MIN_ACA_DIST = 25.0 * u.arcsec  # 25 arcsec min separation (FFS won't find close
 MAX_ACA_DIST = 2.0 * u.deg  # degrees corner to corner (actual max is 7148 arcsec)
 MAX_MAG = 10.0  # Max mag to include in the distances file
 DATE_DISTANCES = "2025:001"  # Date for proper motion correction in distances
-HEALPIX_NSIDE = 16
+HEALPIX_NSIDE = 64
 HEALPIX_ORDER = "nested"
 SKA = os.environ["SKA"]
 
@@ -72,8 +72,10 @@ def get_microagasc():
 
     lon = stars["RA_PMCORR"] * u.deg
     lat = stars["DEC_PMCORR"] * u.deg
-    ipix = hp.lonlat_to_healpix(lon, lat, nside=HEALPIX_NSIDE)
-    stars["ipix"] = ipix.astype(np.uint16 if np.max(ipix) < 65536 else np.uint32)
+    ipix = hp.lonlat_to_healpix(lon, lat, nside=HEALPIX_NSIDE, order=HEALPIX_ORDER)
+    stars["ipix"] = ipix.astype(
+        np.uint16 if hp.nside_to_npix(HEALPIX_NSIDE) < 65536 else np.uint32
+    )
     return stars
 
 
@@ -96,10 +98,11 @@ def get_dists(stars: Table) -> Table:
     # Store mag values in millimag as int16.  Clip for good measure.
     mag0 = np.clip(stars["MAG_ACA"][idxs0] * 1000, -32000, 32000).astype(np.int16)
     mag1 = np.clip(stars["MAG_ACA"][idxs1] * 1000, -32000, 32000).astype(np.int16)
+    pix0 = stars["ipix"][idxs0]
 
     out = Table(
-        [dists, id0, id1, mag0, mag1],
-        names=["dists", "agasc_id0", "agasc_id1", "mag0", "mag1"],
+        [dists, id0, id1, mag0, mag1, pix0],
+        names=["dists", "agasc_id0", "agasc_id1", "mag0", "mag1", "pix0"],
     )
     print("Sorting by dists")
     out.sort("dists")
