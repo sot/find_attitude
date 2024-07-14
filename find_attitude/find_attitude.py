@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import collections
+import functools
 import logging
 import os
 from itertools import product
@@ -30,6 +31,18 @@ except KeyError:
 logger = basic_logger(
     name="find_attitude", level="INFO", format="%(asctime)s %(message)s"
 )
+
+
+
+@functools.lru_cache()
+def get_agasc_pairs_attribute(attr):
+    with tables.open_file(AGASC_PAIRS_FILE, "r") as h5:
+        try:
+            getattr(h5.root.data.attrs, attr)
+        except AttributeError:
+            if attr == "max_mag":
+                return 10.5
+            raise
 
 
 def get_stars_from_text(text):
