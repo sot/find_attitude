@@ -115,13 +115,13 @@ def make_h5_file(dists, filename=DISTANCES_FILE):
         h5.create_table(h5.root, "data", dat, "Data table", expectedrows=len(dat))
 
         # Add some metadata
-        h5.root.data.max_mag = MAX_MAG
-        h5.root.data.min_aca_dist = MIN_ACA_DIST.to_value(u.arcsec)
-        h5.root.data.max_aca_dist = MAX_ACA_DIST.to_value(u.deg)
-        h5.root.data.date_distances = DATE_DISTANCES
-        h5.root.data.healpix_nside = HEALPIX_NSIDE
-        h5.root.data.healpix_order = HEALPIX_ORDER
-        h5.root.data.agasc_version = AGASC_VERSION
+        h5.root.data.attrs.max_mag = MAX_MAG
+        h5.root.data.attrs.min_aca_dist = MIN_ACA_DIST.to_value(u.arcsec)
+        h5.root.data.attrs.max_aca_dist = MAX_ACA_DIST.to_value(u.deg)
+        h5.root.data.attrs.date_distances = DATE_DISTANCES
+        h5.root.data.attrs.healpix_nside = HEALPIX_NSIDE
+        h5.root.data.attrs.healpix_order = HEALPIX_ORDER
+        h5.root.data.attrs.agasc_version = AGASC_VERSION
 
         h5.root.data.flush()
 

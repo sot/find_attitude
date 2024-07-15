@@ -38,7 +38,7 @@ logger = basic_logger(
 def get_agasc_pairs_attribute(attr):
     with tables.open_file(AGASC_PAIRS_FILE, "r") as h5:
         try:
-            getattr(h5.root.data.attrs, attr)
+            return getattr(h5.root.data.attrs, attr)
         except AttributeError:
             if attr == "max_mag":
                 return 10.5
