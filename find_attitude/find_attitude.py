@@ -240,7 +240,7 @@ def add_edge(graph, id0, id1, i0, i1, dist):
         edge["i1"].append(i1)
 
 
-def connected_agasc_ids(ap):
+def connected_agasc_ids(ap, min_stars):
     """Return agacs_ids that occur at least 4 times.
 
     Each occurrence indicates an edge containing that agasc_id node.
@@ -251,7 +251,7 @@ def connected_agasc_ids(ap):
     agasc_ids = np.concatenate((ap["agasc_id0"], ap["agasc_id1"]))
     c = Column(agasc_ids)
     cg = c.group_by(c)
-    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= 3)
+    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= min_stars - 1)
     out = set(cg.groups.keys[i_big_enough].tolist())
 
     return out
@@ -280,6 +280,8 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
     mag0s = aca_pairs["mag0"]
     mag1s = aca_pairs["mag1"]
 
+    min_stars = get_min_stars(healpix_indices)
+
     logger.info("Starting get_match_graph")
     gmatch = nx.Graph()
     ap_list = []
@@ -307,12 +309,10 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
         ap_list.append(ap)
         logger.debug("  Found {} matching pairs".format(len(ap)))
 
-    ap = vstack(
-        ap_list
-    )  # Vertically stack the individual AGASC pairs tables into one big table
-    connected_ids = connected_agasc_ids(
-        ap
-    )  # Find nodes with at least three connections
+    # Vertically stack the individual AGASC pairs tables into one big table
+    ap = vstack(ap_list)
+    # Find nodes with at least (min_stars - 1) connections
+    connected_ids = connected_agasc_ids(ap, min_stars)
 
     agasc_id0 = ap["agasc_id0"]
     agasc_id1 = ap["agasc_id1"]
@@ -331,6 +331,30 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
     logger.info("Added total of {} nodes".format(len(gmatch)))
 
     return gmatch
+
+
+def get_min_stars(healpix_indices):
+    """Minimum number of stars required for an attitude solution.
+
+    This is somewhat arbitrary, but the number of healpix indices corresponds to sky
+    area and is a decent proxy for the number of stars that will be found in the
+    matching process.
+    """
+    # Formula for number of pixels for nside
+    npix = get_agasc_pairs_attribute("healpix_nside") ** 2 * 12
+
+    if healpix_indices is None:
+        min_stars = 4
+    elif len(healpix_indices) < npix / 100:
+        # Typically where an estimated attitude is supplied
+        min_stars = 2
+    elif len(healpix_indices) < npix / 10:
+        # Typically for normal_sun=True
+        min_stars = 3
+    else:
+        min_stars = 4
+
+    return min_stars
 
 
 def get_slot_id_candidates(graph, nodes):
@@ -644,11 +668,12 @@ def find_attitude_solutions(stars, tolerance=2.5, healpix_indices=None):
 
     :returns: list of solutions, where each solution is a dict
     """
-    if len(stars) < 4:
+    min_stars = get_min_stars(healpix_indices)
+
+    if len(stars) < min_stars:
         raise ValueError(
-            "need at least 4 stars for matching, only {} were provided".format(
-                len(stars)
-            )
+            f"need at least {min_stars} stars for matching,"
+            f" only {len(stars)} were provided"
         )
 
     agasc_id_star_maps = find_all_matching_agasc_ids(
