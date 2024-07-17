@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-import functools
 from pprint import pprint
 
 import agasc
