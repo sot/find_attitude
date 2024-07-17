@@ -116,7 +116,7 @@ def make_h5_file(dists, filename=DISTANCES_FILE):
 
         # Add some metadata
         h5.root.data.attrs.max_mag = MAX_MAG
-        h5.root.data.attrs.min_aca_dist = MIN_ACA_DIST.to_value(u.arcsec)
+        h5.root.data.attrs.min_aca_dist = MIN_ACA_DIST.to_value(u.deg)
         h5.root.data.attrs.max_aca_dist = MAX_ACA_DIST.to_value(u.deg)
         h5.root.data.attrs.date_distances = DATE_DISTANCES
         h5.root.data.attrs.healpix_nside = HEALPIX_NSIDE
