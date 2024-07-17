@@ -32,6 +32,18 @@ logger = basic_logger(
     name="find_attitude", level="INFO", format="%(asctime)s %(message)s"
 )
 
+# Define AGASC pairs h5 file attribute defaults. This is most applicable for testing
+# with the legacy distances.h5 file.
+ATTRIBUTE_DEFAULTS = {
+    "max_mag": 10.5,
+    "min_aca_dist": 25.0,
+    "max_aca_dist": 7200.0,
+    "date_distances": "2015:001",
+    "healpix_nside": 16,
+    "healpix_order": "nested",
+    "agasc_version": "1p7",
+}
+
 
 
 @functools.lru_cache()
@@ -40,9 +52,7 @@ def get_agasc_pairs_attribute(attr):
         try:
             return getattr(h5.root.data.attrs, attr)
         except AttributeError:
-            if attr == "max_mag":
-                return 10.5
-            raise
+            return ATTRIBUTE_DEFAULTS[attr]
 
 
 def get_stars_from_text(text):
