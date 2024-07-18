@@ -36,8 +36,8 @@ logger = basic_logger(
 # with the legacy distances.h5 file.
 ATTRIBUTE_DEFAULTS = {
     "max_mag": 10.5,
-    "min_aca_dist": 25.0,
-    "max_aca_dist": 7200.0,
+    "min_aca_dist": 25.0 / 3600.0,  # deg
+    "max_aca_dist": 7200.0 / 3600.0,  # deg
     "date_distances": "2015:001",
     "healpix_nside": 16,
     "healpix_order": "nested",
