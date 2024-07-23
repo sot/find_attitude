@@ -293,7 +293,8 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
             "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
         )
         if healpix_indices is not None:
-            ap = ap[np.in1d(ap["pix0"], healpix_indices)]
+            ok = np.in1d(ap["pix0"], healpix_indices) | np.in1d(ap["pix1"], healpix_indices)
+            ap = ap[ok]
 
         # Filter AGASC pairs based on star pairs magnitudes
         if DELTA_MAG is not None:

@@ -98,11 +98,12 @@ def get_dists(stars: Table) -> Table:
     # Store mag values in millimag as int16.  Clip for good measure.
     mag0 = np.clip(stars["MAG_ACA"][idxs0] * 1000, -32000, 32000).astype(np.int16)
     mag1 = np.clip(stars["MAG_ACA"][idxs1] * 1000, -32000, 32000).astype(np.int16)
-    pix0 = stars["ipix"][idxs0]
+    pix0 = stars["ipix"][idxs0].astype(np.uint16)
+    pix1 = stars["ipix"][idxs1].astype(np.uint16)
 
     out = Table(
-        [dists, id0, id1, mag0, mag1, pix0],
-        names=["dists", "agasc_id0", "agasc_id1", "mag0", "mag1", "pix0"],
+        [dists, id0, id1, mag0, mag1, pix0, pix1],
+        names=["dists", "agasc_id0", "agasc_id1", "mag0", "mag1", "pix0", "pix1"],
     )
     print("Sorting by dists")
     out.sort("dists")
