@@ -13,20 +13,14 @@ from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
 from ska_helpers.logging import basic_logger
 
-SKA = Path(os.environ["SKA"])
-
 DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
 
-# Get the pre-made list of distances between AGASC stars.  The distances_kadi version
-# is a symlink to a file on the kadi machine /export disk (faster).  However, if
-# AGASC_PAIRS_FILE env var is defined then use that (for test/development).
-try:
-    AGASC_PAIRS_FILE = os.environ["AGASC_PAIRS_FILE"]
-except KeyError:
-    if (path := SKA / "data" / "find_attitude" / "distances-kadi-local.h5").exists():
-        AGASC_PAIRS_FILE = path
-    else:
-        AGASC_PAIRS_FILE = SKA / "data" / "find_attitude" / "distances.h5"
+# Get the pre-made list of distances between AGASC stars.  If AGASC_PAIRS_FILE env var
+# is defined then use that (for test/development).
+AGASC_PAIRS_FILE = os.environ.get(
+    "AGASC_PAIRS_FILE",
+    default=Path(os.environ["SKA"]) / "data" / "find_attitude" / "distances.h5",
+)
 
 logger = basic_logger(
     name="find_attitude", level="INFO", format="%(asctime)s %(message)s"
@@ -43,7 +37,6 @@ ATTRIBUTE_DEFAULTS = {
     "healpix_order": "nested",
     "agasc_version": "1p7",
 }
-
 
 
 @functools.lru_cache()
