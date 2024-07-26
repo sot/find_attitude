@@ -1,39 +1,51 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import collections
+import functools
 import logging
 import os
 from itertools import product
+from pathlib import Path
 
+import networkx as nx
 import numpy as np
-import pyyaks.logger
 import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
-from ska_path import ska_path
-
-try:
-    import networkx as nx
-except ImportError:
-    import warnings
-
-    warnings.warn("find_attitude could not import networkx")
+from ska_helpers.logging import basic_logger
 
 DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
 
-# Get the pre-made list of distances between AGASC stars.  The distances_kadi version
-# is a symlink to a file on the kadi machine /export disk (faster).  However, if
-# AGASC_PAIRS_FILE env var is defined then use that (for test/development).
-try:
-    AGASC_PAIRS_FILE = os.environ["AGASC_PAIRS_FILE"]
-except KeyError:
-    AGASC_PAIRS_FILE = ska_path(
-        "data", "find_attitude", "distances-kadi-local.h5"
-    ) or ska_path("data", "find_attitude", "distances.h5")
-
-loglevel = pyyaks.logger.INFO
-logger = pyyaks.logger.get_logger(
-    name="find_attitude", level=loglevel, format="%(asctime)s %(message)s"
+# Get the pre-made list of distances between AGASC stars.  If AGASC_PAIRS_FILE env var
+# is defined then use that (for test/development).
+AGASC_PAIRS_FILE = os.environ.get(
+    "AGASC_PAIRS_FILE",
+    default=Path(os.environ["SKA"]) / "data" / "find_attitude" / "distances.h5",
 )
+
+logger = basic_logger(
+    name="find_attitude", level="INFO", format="%(asctime)s %(message)s"
+)
+
+# Define AGASC pairs h5 file attribute defaults. This is most applicable for testing
+# with the legacy distances.h5 file.
+ATTRIBUTE_DEFAULTS = {
+    "max_mag": 10.5,
+    "min_aca_dist": 25.0 / 3600.0,  # deg
+    "max_aca_dist": 7200.0 / 3600.0,  # deg
+    "date_distances": "2015:001",
+    "healpix_nside": 16,
+    "healpix_order": "nested",
+    "agasc_version": "1p7",
+}
+
+
+@functools.lru_cache()
+def get_agasc_pairs_attribute(attr):
+    with tables.open_file(AGASC_PAIRS_FILE, "r") as h5:
+        try:
+            return getattr(h5.root.data.attrs, attr)
+        except AttributeError:
+            return ATTRIBUTE_DEFAULTS[attr]
 
 
 def get_stars_from_text(text):
@@ -269,7 +281,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
 
     logger.info("Getting matches from file")
     for i0, i1, dist, mag0, mag1 in zip(idx0s, idx1s, dists, mag0s, mag1s):
-        logger.verbose("Getting matches from file {} {} {}".format(i0, i1, dist))
+        logger.debug("Getting matches from file {} {} {}".format(i0, i1, dist))
         ap = agasc_pairs.read_where(
             "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
         )
@@ -286,7 +298,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
             names=["dists", "agasc_id0", "agasc_id1", "i0", "i1"],
         )
         ap_list.append(ap)
-        logger.verbose("  Found {} matching pairs".format(len(ap)))
+        logger.debug("  Found {} matching pairs".format(len(ap)))
 
     ap = vstack(
         ap_list
@@ -348,7 +360,6 @@ def get_slot_id_candidates(graph, nodes):
 
     id_candidates = []
     for i0_id0s, i1_id1s in zip(product(*i0_id0s_list), product(*i1_id1s_list)):
-        logger.info("")
         node_star_index_count = collections.defaultdict(collections.Counter)
         for i0_id0, i1_id1 in zip(i0_id0s, i1_id1s):
             i0, id0 = i0_id0
@@ -360,13 +371,13 @@ def get_slot_id_candidates(graph, nodes):
         try:
             agasc_id_star_index_map = {}
             for agasc_id, count_dict in node_star_index_count.items():
-                logger.verbose("AGASC ID {} has counts {}".format(agasc_id, count_dict))
+                logger.debug("AGASC ID {} has counts {}".format(agasc_id, count_dict))
                 for index, count in count_dict.items():
                     if count == n_nodes - 1:
                         agasc_id_star_index_map[agasc_id] = index
                         break
                 else:
-                    logger.verbose(
+                    logger.debug(
                         "  **** AGASC ID {} is incomplete **** ".format(agasc_id)
                     )
                     raise BadCandidateError
@@ -427,7 +438,7 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
                         add_edge(g_geom_match, tri[0], tri[2], e1_i0, e1_i1, e1["dist"])
                         add_edge(g_geom_match, tri[2], tri[1], e2_i0, e2_i1, e2["dist"])
 
-    if logger.level <= pyyaks.logger.DEBUG:
+    if logger.level <= logging.DEBUG:
         logger.debug("g_geom_match: ")
         for n0, n1 in nx.edges(g_geom_match):
             ed = g_geom_match.get_edge_data(n0, n1)
@@ -673,6 +684,8 @@ def _update_solutions(solutions, stars):
             elif "agasc" in name.lower():
                 format = "{:d}"
             elif name in ("m_yag", "dy", "m_zag", "dz", "dr"):
+                format = "{:.2f}"
+            elif name in ("YAG", "YAG_ERR", "ZAG", "ZAG_ERR", "MAG_ACA", "MAG_ERROR"):
                 format = "{:.2f}"
             else:
                 format = None

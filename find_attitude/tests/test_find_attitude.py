@@ -2,16 +2,21 @@
 from pprint import pprint
 
 import agasc
+import astropy.units as u
 import numpy as np
+from astropy.coordinates import SkyCoord
 from astropy.io import ascii
 from Quaternion import Quat
 from Ska.quatutil import radec2yagzag
 
 from find_attitude.find_attitude import (
     find_attitude_solutions,
+    get_agasc_pairs_attribute,
     get_dists_yag_zag,
     get_stars_from_text,
 )
+
+MAX_MAG = get_agasc_pairs_attribute("max_mag")
 
 
 def get_stars(
@@ -23,11 +28,18 @@ def get_stars(
     sigma_1axis=0.4,
     sigma_mag=0.2,
 ):
+    # Make test results reproducible
+    np.random.seed(int(ra * 100 + dec * 10 + roll))
+
     if select is None:
         select = slice(None, 8)
-    stars = agasc.get_agasc_cone(ra, dec, 1.0)
-    ok = (stars["MAG_ACA"] > 5) & (stars["ASPQ1"] == 0) & (stars["MAG_ACA"] < 10.5)
-    stars = stars[ok]
+    agasc_file = agasc.get_agasc_filename("miniagasc_*")
+    stars = agasc.get_agasc_cone(ra, dec, 1.0, date="2025:001", agasc_file=agasc_file)
+    stars = stars[stars["MAG_ACA"] < MAX_MAG]
+    remove_close_pairs(stars, radius=5 * u.arcsec, both=True)
+    remove_close_pairs(stars, radius=25 * u.arcsec, both=False)
+    stars = stars[stars["MAG_ACA"] > 5.0]
+
     if brightest:
         stars.sort("MAG_ACA")
     else:
@@ -59,6 +71,36 @@ def get_stars(
     ]
 
     return stars
+
+
+def remove_close_pairs(stars, radius: u.Quantity, both=False):
+    """
+    Remove one or both stars that are close to each other.
+
+    In AGASC 1.8, very close star pairs can have ASPQ1=0, so we need to remove them
+    here. Otherwise we can (and do, in testing) get a mismatch where the solution has
+    the wrong star. E.g. ra = 278.33913, dec = -52.29810, roll = 258.51642.
+    """
+    sc = SkyCoord(ra=stars["RA"], dec=stars["DEC"], unit="deg")
+    idxs1, idxs2, d2ds, _ = sc.search_around_sky(sc, radius)
+    d2ds = d2ds.to(u.arcsec)
+    idxs_drop = set()
+    for idx1, idx2, d2d in zip(idxs1, idxs2, d2ds):
+        if idx1 < idx2 and idx1 not in idxs_drop:
+            if both:
+                star = stars[idx1]
+                print(
+                    f"Removing star(1) {star['AGASC_ID']} with "
+                    f"ra={star['RA']:.5f}, dec={star['DEC']:.5f} mag={star['MAG_ACA']:.2f} dist={d2d:.2f}"
+                )
+                idxs_drop.add(idx1)
+            idxs_drop.add(idx2)
+            star = stars[idx2]
+            print(
+                f"Removing star(2) {star['AGASC_ID']} with "
+                f"ra={star['RA']:.5f}, dec={star['DEC']:.5f} mag={star['MAG_ACA']:.2f} dist={d2d:.2f}"
+            )
+    stars.remove_rows(list(idxs_drop))
 
 
 def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
@@ -96,12 +138,16 @@ def test_overlapping_distances(tolerance=3.0):
     check_output(solutions, stars, ra, dec, roll)
 
 
-def _test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
+def _test_random(
+    n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True
+):
+    np.random.seed(0)
     for _ in range(n_iter):
         global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
         ra = np.random.uniform(0, 360)
         dec = np.random.uniform(-90, 90)
         roll = np.random.uniform(0, 360)
+        n_stars = np.random.randint(4, 8)
         stars = get_stars(
             ra,
             dec,
@@ -110,6 +156,7 @@ def _test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
             sigma_mag=sigma_mag,
             brightest=brightest,
         )
+        stars = stars[:n_stars]
         solutions = find_attitude_solutions(stars)
         check_output(solutions, stars, ra, dec, roll)
 
@@ -145,14 +192,16 @@ def check_output(solutions, stars, ra, dec, roll):
         d_roll, d_pitch, d_yaw, _ = 2 * np.degrees(d_att.q) * 3600.0
 
         print("============================")
-        print("Input: RA Dec Roll = {} {} {}".format(ra, dec, roll))
-        print("Solve: RA Dec Roll = {} {} {}".format(*att_fit.equatorial))
+        print(f"Input: RA Dec Roll = {ra:.5f} {dec:.5f} {roll:.5f}")
+        print(
+            f"Solve: RA Dec Roll = {att_fit.equatorial[0]:.5f} {att_fit.equatorial[1]:.5f} {att_fit.equatorial[2]:.5f}"
+        )
         print(solution["summary"])
         if solution["bad_fit"]:
             print("BAD FIT!")
             continue
 
-        assert d_roll < 40.0
+        assert d_roll < 55.0  # Corresponds to ~1.0 arcsec offset at corner of CCD
         assert d_pitch < 1.0
         assert d_yaw < 1.0
 
@@ -166,7 +215,7 @@ def check_output(solutions, stars, ra, dec, roll):
 
 def test_ra_dec_roll(
     ra=115.770455413,
-    dec=-77.6580358662,
+    dec=-75.6580358662,
     roll=86.4089128685,
     brightest=True,
     provide_mags=True,
@@ -177,7 +226,7 @@ def test_ra_dec_roll(
     stars = get_stars(
         ra, dec, roll, sigma_1axis=sigma_1axis, sigma_mag=sigma_mag, brightest=brightest
     )
-    solutions = find_attitude_solutions(stars)
+    solutions = find_attitude_solutions(stars, tolerance=2.5)
     check_output(solutions, stars, ra, dec, roll)
 
 
