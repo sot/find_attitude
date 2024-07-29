@@ -6,8 +6,8 @@ import astropy.units as u
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
+from chandra_aca.transform import radec_to_yagzag, yagzag_to_pixels
 from Quaternion import Quat
-from Ska.quatutil import radec2yagzag
 
 from find_attitude.find_attitude import (
     find_attitude_solutions,
@@ -27,6 +27,7 @@ def get_stars(
     brightest=True,
     sigma_1axis=0.4,
     sigma_mag=0.2,
+    date="2025:001",
 ):
     # Make test results reproducible
     np.random.seed(int(ra * 100 + dec * 10 + roll))
@@ -34,7 +35,7 @@ def get_stars(
     if select is None:
         select = slice(None, 8)
     agasc_file = agasc.get_agasc_filename("miniagasc_*")
-    stars = agasc.get_agasc_cone(ra, dec, 1.0, date="2025:001", agasc_file=agasc_file)
+    stars = agasc.get_agasc_cone(ra, dec, 1.2, date=date, agasc_file=agasc_file)
     stars = stars[stars["MAG_ACA"] < MAX_MAG]
     remove_close_pairs(stars, radius=5 * u.arcsec, both=True)
     remove_close_pairs(stars, radius=25 * u.arcsec, both=False)
@@ -46,15 +47,14 @@ def get_stars(
         index = np.arange(len(stars))
         np.random.shuffle(index)
         stars = stars[index]
-    stars = stars[select].copy()
-    yags, zags = radec2yagzag(
+    yags, zags = radec_to_yagzag(
         stars["RA_PMCORR"], stars["DEC_PMCORR"], Quat([ra, dec, roll])
     )
     stars["YAG_ERR"] = np.random.normal(scale=sigma_1axis, size=len(stars))
     stars["ZAG_ERR"] = np.random.normal(scale=sigma_1axis, size=len(stars))
     stars["MAG_ERROR"] = np.random.normal(scale=sigma_mag, size=len(stars))
-    stars["YAG"] = yags * 3600 + stars["YAG_ERR"]
-    stars["ZAG"] = zags * 3600 + stars["ZAG_ERR"]
+    stars["YAG"] = yags + stars["YAG_ERR"]
+    stars["ZAG"] = zags + stars["ZAG_ERR"]
     stars["MAG_ACA"] += stars["MAG_ERROR"]
     stars["RA"] = stars["RA_PMCORR"]
     stars["DEC"] = stars["DEC_PMCORR"]
@@ -69,6 +69,13 @@ def get_stars(
         "MAG_ACA",
         "MAG_ERROR",
     ]
+
+    # Make sure stars are on the CCD
+    rows, cols = yagzag_to_pixels(stars["YAG"], stars["ZAG"], allow_bad=True)
+    ok = (np.abs(rows) < 506.0) & (np.abs(cols) < 506.0)
+    stars = stars[ok]
+
+    stars = stars[select].copy()
 
     return stars
 
