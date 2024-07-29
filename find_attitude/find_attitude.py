@@ -3,6 +3,7 @@ import collections
 import functools
 import logging
 import os
+from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
@@ -257,7 +258,7 @@ def connected_agasc_ids(ap, min_stars):
     return out
 
 
-def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
+def get_match_graph(aca_pairs, agasc_pairs, tolerance, constraints=None):
     """Return network graph of all AGASC pairs that correspond to an ACA pair.
 
     Given a table of ``aca_pairs`` representing the distance between every pair in the
@@ -269,8 +270,8 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
     :param aca_pairs: Table of pairwise distances for observed ACA star data
     :param agasc_pairs: Table of pairwise distances for AGASC catalog stars
     :param tolerance: matching distance (arcsec)
-    :param healpix_indices: ndarray or None
-        list of healpix indices to restrict matches on sky
+    :param constraints: Constraints object or None
+        Attitude and normal sun constraints if available
 
     :returns: networkx graph of distance-match pairs
     """
@@ -280,7 +281,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
     mag0s = aca_pairs["mag0"]
     mag1s = aca_pairs["mag1"]
 
-    min_stars = get_min_stars(healpix_indices)
+    min_stars = get_min_stars(constraints)
 
     logger.info("Starting get_match_graph")
     gmatch = nx.Graph()
@@ -292,8 +293,10 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
         ap = agasc_pairs.read_where(
             "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
         )
-        if healpix_indices is not None:
-            ok = np.in1d(ap["pix0"], healpix_indices) | np.in1d(ap["pix1"], healpix_indices)
+        if constraints is not None:
+            ok = np.in1d(ap["pix0"], constraints.healpix_indices) | np.in1d(
+                ap["pix1"], constraints.healpix_indices
+            )
             ap = ap[ok]
 
         # Filter AGASC pairs based on star pairs magnitudes
@@ -334,22 +337,27 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, healpix_indices=None):
     return gmatch
 
 
-def get_min_stars(healpix_indices):
+def get_min_stars(constraints):
     """Minimum number of stars required for an attitude solution.
 
     This is somewhat arbitrary, but the number of healpix indices corresponds to sky
     area and is a decent proxy for the number of stars that will be found in the
     matching process.
+
+    Parameters
+    ----------
+    constraints : Constraints object or None
+        Attitude and normal sun constraints if available
     """
     # Formula for number of pixels for nside
     npix = get_agasc_pairs_attribute("healpix_nside") ** 2 * 12
 
-    if healpix_indices is None:
+    if constraints is None:
         min_stars = 4
-    elif len(healpix_indices) < npix / 100:
+    elif len(constraints.healpix_indices) < npix / 100:
         # Typically where an estimated attitude is supplied
         min_stars = 2
-    elif len(healpix_indices) < npix / 10:
+    elif len(constraints.healpix_indices) < npix / 10:
         # Typically for normal_sun=True
         min_stars = 3
     else:
@@ -422,7 +430,7 @@ def get_slot_id_candidates(graph, nodes):
 
 
 def find_matching_agasc_ids(
-    stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5, healpix_indices=None
+    stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5, constraints=None
 ):
     """Given an input table of ``stars`` find the matching cliques.
 
@@ -440,8 +448,8 @@ def find_matching_agasc_ids(
     :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py
     :param g_dist_match: graph with matching distances (optional, for development)
     :param tolerance: distance matching tolerance (arcsec)
-    :param healpix_indices: ndarray or None
-        list of healpix indices to restrict matches on sky
+    :param constraints: Constraints object or None
+        Attitude and normal sun constraints if available
 
     :returns: list of possible AGASC-ID to star index maps
     """
@@ -449,7 +457,7 @@ def find_matching_agasc_ids(
         logger.info("Using AGASC pairs file {}".format(agasc_pairs_file))
         h5 = tables.open_file(agasc_pairs_file, "r")
         agasc_pairs = h5.root.data
-        g_dist_match = get_match_graph(stars, agasc_pairs, tolerance, healpix_indices)
+        g_dist_match = get_match_graph(stars, agasc_pairs, tolerance, constraints)
         h5.close()
 
     logger.info("Getting all triangles from match graph")
@@ -504,7 +512,7 @@ def find_all_matching_agasc_ids(
     agasc_pairs_file=None,
     dist_match_graph=None,
     tolerance=2.5,
-    healpix_indices=None,
+    constraints=None,
 ):
     """Given an input table of ``stars`` find the matching cliques.
 
@@ -518,8 +526,8 @@ def find_all_matching_agasc_ids(
     :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py
     :param dist_match_graph: graph with matching distances (optional, for development)
     :param tolerance: distance matching tolerance (arcsec)
-    :param healpix_indices: ndarray or None
-        list of healpix indices to restrict matches on sky
+    :param constraints: Constraints object or None
+        Attitude and normal sun constraints if available
 
     :returns: list of possible AGASC-ID to star index maps
     """
@@ -529,7 +537,7 @@ def find_all_matching_agasc_ids(
         agasc_pairs_file,
         dist_match_graph,
         tolerance=tolerance,
-        healpix_indices=healpix_indices,
+        constraints=constraints,
     )
     return agasc_id_star_maps
 
@@ -643,7 +651,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     return out
 
 
-def find_attitude_solutions(stars, tolerance=2.5, healpix_indices=None):
+def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
     """
     Find attitude solutions given an input table of star data.
 
@@ -664,13 +672,13 @@ def find_attitude_solutions(stars, tolerance=2.5, healpix_indices=None):
 
     :param stars: table of star data
     :param tolerance: matching tolerance (arcsec, default=2.5)
-    :param healpix_indices: ndarray or None
-        list of healpix indices to restrict matches on sky
+    :param constraints: Constraints object or None
+        Attitude and normal sun constraints if available
 
     :returns: list of solutions, where each solution is a dict
     """
-    min_stars = get_min_stars(healpix_indices)
 
+    min_stars = get_min_stars(constraints)
     if len(stars) < min_stars:
         raise ValueError(
             f"need at least {min_stars} stars for matching,"
@@ -683,7 +691,7 @@ def find_attitude_solutions(stars, tolerance=2.5, healpix_indices=None):
         stars["MAG_ACA"],
         agasc_pairs_file=AGASC_PAIRS_FILE,
         tolerance=tolerance,
-        healpix_indices=healpix_indices,
+        constraints=constraints,
     )
 
     solutions = []
@@ -749,82 +757,95 @@ def _update_solutions(solutions, stars):
         sol["bad_fit"] = np.sum(dr < 3.0) < 4
 
 
-def get_healpix_indices(
-    att: QuatLike | None = None,
-    att_radius: float = 4.0,
-    normal_sun: bool = False,
-    normal_sun_radius=1.5,
-    normal_sun_pitch=90.0,
-    date: CxoTimeLike = None,
-) -> np.ndarray | None:
-    """Return a list of healpix indices based on the attitude and date.
+@dataclass
+class Constraints:
+    """Constraints on attitude for attitude solution."""
 
-    If ``att`` is supplied then restrict to the cone within ``att_radius`` of the
-    attitude quaternion.  If ``normal_sun`` is True then restrict to an annulus
-    corresponding to the normal sun pitch angle. Both can be supplied at the same time.
+    att: QuatLike | None = None
+    att_radius: float = 4.0
+    normal_sun: bool = False
+    normal_sun_radius: float = 1.5
+    normal_sun_pitch: float = 90.0
+    date: CxoTimeLike = None
 
-    If neither ``att`` nor ``normal_sun`` are supplied then return ``None``.
+    @functools.cached_property
+    def healpix_indices(self) -> np.ndarray | None:
+        """Return a list of healpix indices based on the attitude and date.
 
-    Parameters
-    ----------
-    att : QuatLike or None
-        If supplied, restrict to cone within ``attitude_radius`` of attitude quaternion
-    att_radius : float
-        Radius of the attitude cone in degrees (default=4.0)
-    normal_sun : bool
-        If True, restrict to normal sun region
-    normal_sun_radius : float
-        Radius of the normal sun annulus in degrees (default=1.5)
-    normal_sun_pitch : float
-        Pitch angle of normal sun in degrees (default=90.0). E.g. 160.0 for offset NSM.
-    date : CxoTimeLike
-        Date for normal sun calculation (default=now)
+        If ``att`` is supplied then restrict to the cone within ``att_radius`` of the
+        attitude quaternion.  If ``normal_sun`` is True then restrict to an annulus
+        corresponding to the normal sun pitch angle. Both can be supplied at the same time.
 
-    Returns
-    -------
-    healpix_indices : ndarray | None
-        List of healpix indices or None
-    """
-    import astropy_healpix
-    import ska_sun
-    from chandra_aca.transform import eci_to_radec, radec_to_eci
+        If neither ``att`` nor ``normal_sun`` are supplied then return ``None``.
 
-    if att is None and not normal_sun:
-        return None
+        Parameters
+        ----------
+        att : QuatLike or None
+            If supplied, restrict to cone within ``attitude_radius`` of attitude quaternion
+        att_radius : float
+            Radius of the attitude cone in degrees (default=4.0)
+        normal_sun : bool
+            If True, restrict to normal sun region
+        normal_sun_radius : float
+            Radius of the normal sun annulus in degrees (default=1.5)
+        normal_sun_pitch : float
+            Pitch angle of normal sun in degrees (default=90.0). E.g. 160.0 for offset NSM.
+        date : CxoTimeLike
+            Date for normal sun calculation (default=now)
 
-    nside = get_agasc_pairs_attribute("healpix_nside")
-    order = get_agasc_pairs_attribute("healpix_order")
-    max_aca_radius = get_agasc_pairs_attribute("max_aca_dist") / 2
+        Returns
+        -------
+        healpix_indices : ndarray | None
+            List of healpix indices or None
+        """
+        import astropy_healpix
+        import ska_sun
+        from chandra_aca.transform import eci_to_radec, radec_to_eci
 
-    hp = astropy_healpix.HEALPix(nside=nside, order=order)
+        if self.att is None and not self.normal_sun:
+            return None
 
-    if att is None:
-        idxs = np.arange(hp.npix)
-    else:
-        att = Quat(att)
-        idxs = hp.cone_search_lonlat(
-            att.ra * u.deg, att.dec * u.deg, (att_radius + max_aca_radius) * u.deg
-        )
+        nside = get_agasc_pairs_attribute("healpix_nside")
+        order = get_agasc_pairs_attribute("healpix_order")
+        max_aca_radius = get_agasc_pairs_attribute("max_aca_dist") / 2
 
-    if normal_sun:
-        # Get healpix indices of a cone out to normal_sun_pitch + margin, and then
-        # do the same for the anti-sun.  The normal sun indices are the intersection
-        # of these two lists.
-        sun_ra, sun_dec = ska_sun.position(date)
-        sun_eci = radec_to_eci(sun_ra, sun_dec)
-        asun_ra, asun_dec = eci_to_radec(-sun_eci)  # anti-sun
-        idxs_asun = hp.cone_search_lonlat(
-            asun_ra * u.deg,
-            asun_dec * u.deg,
-            radius=(normal_sun_pitch + normal_sun_radius + max_aca_radius) * u.deg,
-        )
-        idxs_sun = hp.cone_search_lonlat(
-            sun_ra * u.deg,
-            sun_dec * u.deg,
-            radius=(180 - normal_sun_pitch + normal_sun_radius + max_aca_radius)
-            * u.deg,
-        )
-        idxs_nsun = np.intersect1d(idxs_sun, idxs_asun, assume_unique=True)
-        idxs = np.intersect1d(idxs, idxs_nsun, assume_unique=True)
+        hp = astropy_healpix.HEALPix(nside=nside, order=order)
 
-    return idxs
+        if self.att is None:
+            idxs = np.arange(hp.npix)
+        else:
+            att = Quat(self.att)
+            idxs = hp.cone_search_lonlat(
+                att.ra * u.deg,
+                att.dec * u.deg,
+                (self.att_radius + max_aca_radius) * u.deg,
+            )
+
+        if self.normal_sun:
+            # Get healpix indices of a cone out to normal_sun_pitch + margin, and then
+            # do the same for the anti-sun.  The normal sun indices are the intersection
+            # of these two lists.
+            sun_ra, sun_dec = ska_sun.position(self.date)
+            sun_eci = radec_to_eci(sun_ra, sun_dec)
+            asun_ra, asun_dec = eci_to_radec(-sun_eci)  # anti-sun
+            idxs_asun = hp.cone_search_lonlat(
+                asun_ra * u.deg,
+                asun_dec * u.deg,
+                radius=(
+                    180
+                    - self.normal_sun_pitch
+                    + self.normal_sun_radius
+                    + max_aca_radius
+                )
+                * u.deg,
+            )
+            idxs_sun = hp.cone_search_lonlat(
+                sun_ra * u.deg,
+                sun_dec * u.deg,
+                radius=(self.normal_sun_pitch + self.normal_sun_radius + max_aca_radius)
+                * u.deg,
+            )
+            idxs_nsun = np.intersect1d(idxs_sun, idxs_asun, assume_unique=True)
+            idxs = np.intersect1d(idxs, idxs_nsun, assume_unique=True)
+
+        return idxs
