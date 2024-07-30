@@ -13,6 +13,7 @@ import numpy as np
 import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
+from chandra_aca.transform import eci_to_radec, radec_to_eci, radec_to_yagzag
 from cxotime import CxoTimeLike
 from Quaternion import Quat, QuatLike
 from ska_helpers.logging import basic_logger
@@ -271,7 +272,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, constraints=None):
     :param agasc_pairs: Table of pairwise distances for AGASC catalog stars
     :param tolerance: matching distance (arcsec)
     :param constraints: Constraints object or None
-        Attitude and normal sun constraints if available
+        Attitude, normal sun, and date constraints if available
 
     :returns: networkx graph of distance-match pairs
     """
@@ -347,7 +348,7 @@ def get_min_stars(constraints):
     Parameters
     ----------
     constraints : Constraints object or None
-        Attitude and normal sun constraints if available
+        Attitude, normal sun, and date constraints if available
     """
     # Formula for number of pixels for nside
     npix = get_agasc_pairs_attribute("healpix_nside") ** 2 * 12
@@ -449,7 +450,7 @@ def find_matching_agasc_ids(
     :param g_dist_match: graph with matching distances (optional, for development)
     :param tolerance: distance matching tolerance (arcsec)
     :param constraints: Constraints object or None
-        Attitude and normal sun constraints if available
+        Attitude, normal sun, and date constraints if available
 
     :returns: list of possible AGASC-ID to star index maps
     """
@@ -527,7 +528,7 @@ def find_all_matching_agasc_ids(
     :param dist_match_graph: graph with matching distances (optional, for development)
     :param tolerance: distance matching tolerance (arcsec)
     :param constraints: Constraints object or None
-        Attitude and normal sun constraints if available
+        Attitude, normal sun, and date constraints if available
 
     :returns: list of possible AGASC-ID to star index maps
     """
@@ -542,7 +543,7 @@ def find_all_matching_agasc_ids(
     return agasc_id_star_maps
 
 
-def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
+def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None):
     """Find the fine attitude for the given inputs.
 
     Find the fine attitude for a given set of yags and zags and a map of AGASC ID
@@ -558,6 +559,12 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
       statval : final fit statistic
       agasc_id_star_map : input AGASC ID to star index map
 
+    :param yags: np.array with star Y angles in arcsec
+    :param zags: np.array with star Z angles in arcsec
+    :param agasc_id_star_map: dict of AGASC ID to star index map
+    :param constraints: Constraints object or None
+        Attitude, normal sun, and date constraints if available
+
     :returns: dict
 
     """
@@ -572,9 +579,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     logging.getLogger("sherpa.image").setLevel(logging.ERROR)
 
     import agasc
-    from Quaternion import Quat
     from sherpa import ui
-    from Ska.quatutil import radec2yagzag
 
     # Set sherpa logger to same level as local logger
     sherpa_logger = logging.getLogger("sherpa")
@@ -587,8 +592,9 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     yags = yags[star_indices]
     zags = zags[star_indices]
 
+    date = constraints.date if constraints else None
     agasc_ids = list(agasc_id_star_map.keys())
-    agasc_stars = [agasc.get_star(agasc_id) for agasc_id in agasc_ids]
+    agasc_stars = [agasc.get_star(agasc_id, date=date) for agasc_id in agasc_ids]
 
     ras = [s["RA_PMCORR"] for s in agasc_stars]
     decs = [s["DEC_PMCORR"] for s in agasc_stars]
@@ -597,8 +603,8 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
 
     def _yag_zag(dra, ddec, droll):
         q = qatt * Quat([dra / 3600.0, ddec / 3600.0, droll])
-        yags, zags = radec2yagzag(ras, decs, q)
-        return yags * 3600, zags * 3600, q
+        yags, zags = radec_to_yagzag(ras, decs, q)
+        return yags, zags, q
 
     def yag_zag(pars, x):  # noqa: ARG001
         m_yags, m_zags, q = _yag_zag(*pars)
@@ -673,7 +679,7 @@ def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
     :param stars: table of star data
     :param tolerance: matching tolerance (arcsec, default=2.5)
     :param constraints: Constraints object or None
-        Attitude and normal sun constraints if available
+        Attitude, normal sun, and date constraints if available
 
     :returns: list of solutions, where each solution is a dict
     """
@@ -697,7 +703,7 @@ def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
     solutions = []
     for agasc_id_star_map in agasc_id_star_maps:
         solution = find_attitude_for_agasc_ids(
-            stars["YAG"], stars["ZAG"], agasc_id_star_map
+            stars["YAG"], stars["ZAG"], agasc_id_star_map, constraints
         )
 
         # Check to see if there is another solution that has overlapping
@@ -800,7 +806,6 @@ class Constraints:
         """
         import astropy_healpix
         import ska_sun
-        from chandra_aca.transform import eci_to_radec, radec_to_eci
 
         if self.att is None and not self.normal_sun:
             return None
