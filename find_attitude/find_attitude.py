@@ -7,13 +7,16 @@ from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
+import agasc
 import astropy.units as u
+import astropy_healpix
 import networkx as nx
 import numpy as np
+import ska_sun
 import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
-from chandra_aca.transform import eci_to_radec, radec_to_eci, radec_to_yagzag
+from chandra_aca.transform import eci_to_radec, radec_to_yagzag
 from cxotime import CxoTimeLike
 from Quaternion import Quat, QuatLike
 from ska_helpers.logging import basic_logger
@@ -763,6 +766,56 @@ def _update_solutions(solutions, stars):
         sol["bad_fit"] = np.sum(dr < 3.0) < 4
 
 
+def get_healpix_indices_within_annulus(
+    ra: float,
+    dec: float,
+    *,
+    radius0: float,
+    radius1: float,
+    nside: int = 64,
+    order: str = "nested",
+):
+    """Get healpix indices within a range of radii from a given RA, Dec.
+
+    This is a much faster, somewhat approximate version of the astropy_healpix method
+    cone_search_lonlat(). It works by computing the positions of the four corners of
+    each pixels and checking if that is within the annulus. This requires that
+    ``radius0`` and ``radius1`` are both much bigger than the healpix pixel size.
+
+    Parameters
+    ----------
+    ra : float
+        Right ascension in degrees
+    dec : float
+        Declination in degrees
+    radius0 : float
+        Inner radius in degrees
+    radius1 : float
+        Outer radius in degrees
+    nside : int
+        Healpix nside parameter (default=64)
+    order : str
+        Healpix order parameter (default='nested')
+
+    Returns
+    -------
+    healpix_indices : ndarray
+        List of healpix indices
+    """
+    npix = astropy_healpix.nside_to_npix(nside)
+
+    ok = np.zeros(npix, dtype=bool)
+    for dx, dy in zip([0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 0.0, 1.0]):
+        x, y, z = astropy_healpix.healpix_to_xyz(
+            np.arange(npix), dx=dx, dy=dy, nside=64, order=order
+        )
+        ras, decs = eci_to_radec(np.array([x, y, z]).T)
+        distances = agasc.sphere_dist(ra, dec, ras, decs)
+        ok |= (distances >= radius0) & (distances <= radius1)
+
+    return np.where(ok)[0]
+
+
 @dataclass
 class Constraints:
     """Constraints on attitude for attitude solution."""
@@ -804,9 +857,6 @@ class Constraints:
         healpix_indices : ndarray | None
             List of healpix indices or None
         """
-        import astropy_healpix
-        import ska_sun
-
         if self.att is None and not self.normal_sun:
             return None
 
@@ -831,26 +881,16 @@ class Constraints:
             # do the same for the anti-sun.  The normal sun indices are the intersection
             # of these two lists.
             sun_ra, sun_dec = ska_sun.position(self.date)
-            sun_eci = radec_to_eci(sun_ra, sun_dec)
-            asun_ra, asun_dec = eci_to_radec(-sun_eci)  # anti-sun
-            idxs_asun = hp.cone_search_lonlat(
-                asun_ra * u.deg,
-                asun_dec * u.deg,
-                radius=(
-                    180
-                    - self.normal_sun_pitch
-                    + self.normal_sun_radius
-                    + max_aca_radius
-                )
-                * u.deg,
+            radius0 = self.normal_sun_pitch - self.normal_sun_radius - max_aca_radius
+            radius1 = self.normal_sun_pitch + self.normal_sun_radius + max_aca_radius
+            idxs_nsun = get_healpix_indices_within_annulus(
+                sun_ra,
+                sun_dec,
+                radius0=radius0,
+                radius1=radius1,
+                nside=nside,
+                order=order,
             )
-            idxs_sun = hp.cone_search_lonlat(
-                sun_ra * u.deg,
-                sun_dec * u.deg,
-                radius=(self.normal_sun_pitch + self.normal_sun_radius + max_aca_radius)
-                * u.deg,
-            )
-            idxs_nsun = np.intersect1d(idxs_sun, idxs_asun, assume_unique=True)
             idxs = np.intersect1d(idxs, idxs_nsun, assume_unique=True)
 
         return idxs
