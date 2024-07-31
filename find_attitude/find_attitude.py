@@ -359,7 +359,7 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance, constraints=None):
         ap = agasc_pairs.read_where(
             "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
         )
-        if constraints is not None:
+        if constraints is not None and constraints.healpix_indices is not None:
             ok = np.in1d(ap["pix0"], constraints.healpix_indices) | np.in1d(
                 ap["pix1"], constraints.healpix_indices
             )
@@ -418,7 +418,7 @@ def get_min_stars(constraints):
     # Formula for number of pixels for nside
     npix = get_agasc_pairs_attribute("healpix_nside") ** 2 * 12
 
-    if constraints is None:
+    if constraints is None or constraints.healpix_indices is None:
         min_stars = 4
     elif len(constraints.healpix_indices) < npix / 100:
         # Typically where an estimated attitude is supplied
@@ -648,10 +648,9 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None)
 
     # Set sherpa logger to same level as local logger
     sherpa_logger = logging.getLogger("sherpa")
-    # FIXME: this looks like a bug in the original code. Either get rid of the loop or
-    # set levels for all handlers along with the sherpa_logger.
-    for _hdlr in sherpa_logger.handlers:
-        sherpa_logger.setLevel(logger.level)
+    sherpa_logger.setLevel(logger.level)
+    for hdlr in sherpa_logger.handlers:
+        hdlr.setLevel(logger.level)
 
     star_indices = list(agasc_id_star_map.values())
     yags = yags[star_indices]
@@ -771,6 +770,9 @@ def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
             stars["YAG"], stars["ZAG"], agasc_id_star_map, constraints
         )
 
+        if constraints and not constraints.check_off_nom_roll(solution["att_fit"]):
+            continue
+
         # Check to see if there is another solution that has overlapping
         # stars.  If there are overlaps and this solution has a lower
         # fit statistic then use this solution.
@@ -880,13 +882,32 @@ def get_healpix_indices_within_annulus(
 
 @dataclass
 class Constraints:
-    """Constraints on attitude for attitude solution."""
+    """Constraints on attitude for attitude solution.
+
+    Parameters
+    ----------
+    att : QuatLike or None
+        If supplied, restrict to cone within ``attitude_radius`` of attitude quaternion
+    att_radius : float
+        Radius of the attitude cone in degrees (default=4.0)
+    normal_sun : bool
+        If True, restrict to normal sun region (default=False)
+    normal_sun_radius : float
+        Radius of the normal sun annulus in degrees (default=1.5)
+    normal_sun_pitch : float
+        Pitch angle of normal sun in degrees (default=90.0). E.g. 160.0 for offset NSM.
+    off_nom_roll_max : float or None
+        Maximum off-nominal roll angle in degrees (default=None)
+    date : CxoTimeLike
+        Date for normal sun calculation (default=now)
+    """
 
     att: QuatLike | None = None
     att_radius: float = 4.0
     normal_sun: bool = False
     normal_sun_radius: float = 1.5
     normal_sun_pitch: float = 90.0
+    off_nom_roll_max: float | None = None
     date: CxoTimeLike = None
 
     @functools.cached_property
@@ -898,21 +919,6 @@ class Constraints:
         corresponding to the normal sun pitch angle. Both can be supplied at the same time.
 
         If neither ``att`` nor ``normal_sun`` are supplied then return ``None``.
-
-        Parameters
-        ----------
-        att : QuatLike or None
-            If supplied, restrict to cone within ``attitude_radius`` of attitude quaternion
-        att_radius : float
-            Radius of the attitude cone in degrees (default=4.0)
-        normal_sun : bool
-            If True, restrict to normal sun region
-        normal_sun_radius : float
-            Radius of the normal sun annulus in degrees (default=1.5)
-        normal_sun_pitch : float
-            Pitch angle of normal sun in degrees (default=90.0). E.g. 160.0 for offset NSM.
-        date : CxoTimeLike
-            Date for normal sun calculation (default=now)
 
         Returns
         -------
@@ -956,3 +962,28 @@ class Constraints:
             idxs = np.intersect1d(idxs, idxs_nsun, assume_unique=True)
 
         return idxs
+
+    def check_off_nom_roll(self, q_att: Quat):
+        """Check if the off-nominal roll angle is within the maximum allowed.
+
+        Parameters
+        ----------
+        q_att : Quat
+            Attitude quaternion
+
+        Returns
+        -------
+        ok : bool
+            True if the off-nominal roll is within the maximum allowed
+        """
+        if self.off_nom_roll_max is None:
+            return True
+
+        off_nom_roll = ska_sun.off_nominal_roll(q_att, CxoTime(self.date))
+        ok = abs(off_nom_roll) <= self.off_nom_roll_max
+        if not ok:
+            logger.info(
+                f"Off-nominal roll {off_nom_roll:.2f} exceeds maximum"
+                f" {self.off_nom_roll_max:.2f}"
+            )
+        return ok
