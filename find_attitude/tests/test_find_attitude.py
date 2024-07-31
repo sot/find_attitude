@@ -1,22 +1,36 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from pprint import pprint
+from pprint import pformat
 
 import agasc
 import astropy.units as u
 import numpy as np
+import pytest
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
 from chandra_aca.transform import radec_to_yagzag, yagzag_to_pixels
 from Quaternion import Quat
 
-from find_attitude.find_attitude import (
+from find_attitude import (
     find_attitude_solutions,
     get_agasc_pairs_attribute,
     get_dists_yag_zag,
+    get_stars_from_maude,
     get_stars_from_text,
+    logger,
 )
 
 MAX_MAG = get_agasc_pairs_attribute("max_mag")
+
+try:
+    import maude
+
+    maude.get_msids(
+        msids="ccsdsid", start="2016:001:00:00:00", stop="2016:001:00:00:02"
+    )
+except Exception:
+    HAS_MAUDE = False
+else:
+    HAS_MAUDE = True
 
 
 def get_stars(
@@ -96,14 +110,14 @@ def remove_close_pairs(stars, radius: u.Quantity, both=False):
         if idx1 < idx2 and idx1 not in idxs_drop:
             if both:
                 star = stars[idx1]
-                print(
+                logger.debug(
                     f"Removing star(1) {star['AGASC_ID']} with "
                     f"ra={star['RA']:.5f}, dec={star['DEC']:.5f} mag={star['MAG_ACA']:.2f} dist={d2d:.2f}"
                 )
                 idxs_drop.add(idx1)
             idxs_drop.add(idx2)
             star = stars[idx2]
-            print(
+            logger.debug(
                 f"Removing star(2) {star['AGASC_ID']} with "
                 f"ra={star['RA']:.5f}, dec={star['DEC']:.5f} mag={star['MAG_ACA']:.2f} dist={d2d:.2f}"
             )
@@ -115,7 +129,7 @@ def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
         ra = np.random.uniform(0, 360)
         dec = np.random.uniform(-90, 90)
         roll = np.random.uniform(0, 360)
-        print(ra, dec, roll)
+        logger.debug(ra, dec, roll)
         stars = get_stars(ra, dec, roll, sigma_1axis=0.001, sigma_mag=0.2)
         dist_table = get_dists_yag_zag(stars["YAG"], stars["ZAG"])
         dists = dist_table["dists"]
@@ -187,26 +201,27 @@ def test_multiple_solutions():
 
 
 def check_output(solutions, stars, ra, dec, roll):
-    print("*********************************************")
-    print()
+    logger.debug("*********************************************")
+    logger.debug("")
     for solution in solutions:
         att_fit = solution["att_fit"]
 
         att_in = Quat([ra, dec, roll])
         d_att = att_in.inv() * att_fit
-        d_roll, d_pitch, d_yaw, _ = 2 * np.degrees(d_att.q) * 3600.0
+        d_roll, d_pitch, d_yaw = d_att.roll0, d_att.pitch, d_att.yaw
 
-        print("============================")
-        print(f"Input: RA Dec Roll = {ra:.5f} {dec:.5f} {roll:.5f}")
-        print(
+        logger.debug("============================")
+        logger.debug(f"Input: RA Dec Roll = {ra:.5f} {dec:.5f} {roll:.5f}")
+        logger.debug(
             f"Solve: RA Dec Roll = {att_fit.equatorial[0]:.5f} {att_fit.equatorial[1]:.5f} {att_fit.equatorial[2]:.5f}"
         )
-        print(solution["summary"])
+        logger.debug(solution["summary"])
         if solution["bad_fit"]:
-            print("BAD FIT!")
+            logger.debug("BAD FIT!")
             continue
 
-        assert d_roll < 55.0  # Corresponds to ~1.0 arcsec offset at corner of CCD
+        d_roll_lim = {2: 100, 3: 80, 4: 70, 5: 60, 6: 55, 7: 50, 8: 45}[len(stars)]
+        assert d_roll < d_roll_lim
         assert d_pitch < 1.0
         assert d_yaw < 1.0
 
@@ -215,7 +230,7 @@ def check_output(solutions, stars, ra, dec, roll):
         assert np.all(sok["AGASC_ID"] == sok["m_agasc_id"])
 
     assert sum(1 for s in solutions if not s["bad_fit"]) == 1
-    print("*********************************************\n")
+    logger.debug("*********************************************\n")
 
 
 def test_ra_dec_roll(
@@ -271,8 +286,8 @@ def test_get_stars_from_greta():
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     assert len(solutions) == 1
     solution = solutions[0]
-    pprint(solution)
-    print("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
+    logger.debug(pformat(solution))
+    logger.debug("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
 
 
 def test_get_stars_from_table():
@@ -302,8 +317,27 @@ def test_get_stars_from_table():
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     assert len(solutions) == 1
     solution = solutions[0]
-    pprint(solution)
-    print("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
+    logger.debug(pformat(solution))
+    logger.debug("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
+
+
+@pytest.mark.skipif(not HAS_MAUDE, reason="maude not available")
+def test_get_stars_from_maude():
+    stars = get_stars_from_maude("2024:001:12:00:00", dt=12.0)
+    assert stars.pformat_all() == [
+        "slot   YAG      ZAG    MAG_ACA",
+        "---- -------- -------- -------",
+        "   0    39.69 -1882.49    7.31",
+        "   1  2138.01   154.69    7.19",
+        "   2 -1826.71   149.87    7.12",
+        "   3  2338.57 -1508.50    5.62",
+        "   4  1628.89  -269.88    7.69",
+        "   5 -1060.80   904.76    7.88",
+        "   6  2446.09 -2077.31    8.25",
+        "   7 -1562.49  1452.76    8.73",
+    ]
+    solutions = find_attitude_solutions(stars)
+    assert len(solutions) == 1
 
 
 def check_at_time(time, qatt=None):
@@ -350,8 +384,8 @@ def check_at_time(time, qatt=None):
     solution = solutions[0]
     dq = qatt.inv() * solution["att_fit"]
 
-    print(solution["att_fit"].equatorial)
-    print(solution["summary"])
+    logger.debug(solution["att_fit"].equatorial)
+    logger.debug(solution["summary"])
 
     assert abs(dq.q[0] * 2 * 3600) < 60  # arcsec
     assert abs(dq.q[1] * 2 * 3600) < 1.5  # arcsec
@@ -375,3 +409,7 @@ def test_at_times():
     )  # Telem aoattqt* are wrong
     for time, qatt in zip(times, qatts):
         check_at_time(time, qatt)
+
+
+def test_nsm_constraint():
+    """ """

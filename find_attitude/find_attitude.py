@@ -17,7 +17,7 @@ import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
 from chandra_aca.transform import eci_to_radec, radec_to_yagzag
-from cxotime import CxoTimeLike
+from cxotime import CxoTime, CxoTimeLike
 from Quaternion import Quat, QuatLike
 from ska_helpers.logging import basic_logger
 
@@ -139,6 +139,68 @@ def get_stars_from_text(text):
         ok = (stars["YAG"] > -3200) & (stars["ZAG"] > -3200)
 
     return stars[ok]
+
+
+def get_stars_from_maude(date: CxoTimeLike = None, dt: float = 11.0):
+    """Get star data from MAUDE for a given date.
+
+    This gets ``dt`` seconds of star data ending at ``date``. If ``date`` is None then
+    get the most recent star data. The star data are AOACYAN, AOACZAN, and AOACMAG for
+    each of the 8 slots.
+
+    Parameters
+    ----------
+    date : CxoTimeLike
+        Date for which to get star data
+    dt : float
+        Time interval (seconds) for which to get star data
+
+    Returns
+    -------
+    Table
+        Table of star data for tracked stars in the 8 slots. Columns are 'slot', 'YAG',
+        'ZAG', and 'MAG_ACA'.
+    """
+    import maude
+    from cxotime import CxoTime
+
+    msids = []
+    msids.extend([f"aoacyan{ii}" for ii in range(8)])
+    msids.extend([f"aoaczan{ii}" for ii in range(8)])
+    msids.extend([f"aoacmag{ii}" for ii in range(8)])
+    stop = CxoTime(date)
+    start = stop - dt * u.s
+    dat = maude.get_msids(msids, start=start, stop=stop)
+    results = dat["data"]
+    out = {}
+    for result in results:
+        msid = result["msid"]
+        values = result["values"]
+        if len(values) == 0:
+            # Missing data, this should no happen but just in case
+            value = -9999.0
+        elif len(values) < 6:
+            value = np.median(values)
+        else:
+            # Throw out the top and bottom 2 values and take the mean of the middle
+            values = np.sort(values)
+            value = np.mean(values[2:-2])
+        out[msid] = value
+    tbl = Table()
+
+    tbl["slot"] = np.arange(8)
+    tbl["YAG"] = [out[f"AOACYAN{ii}"] for ii in range(8)]
+    tbl["ZAG"] = [out[f"AOACZAN{ii}"] for ii in range(8)]
+    tbl["MAG_ACA"] = [out[f"AOACMAG{ii}"] for ii in range(8)]
+    tbl.meta["date_solution"] = (stop - dt * u.s / 2).date
+
+    # Filter non-tracking slots
+    ok = (tbl["YAG"] > -3200) | (tbl["ZAG"] > -3200)
+    tbl = tbl[ok]
+    for name in ["YAG", "ZAG", "MAG_ACA"]:
+        tbl[name].format = ".2f"
+
+    return tbl
 
 
 def get_dists_yag_zag(yags, zags, mags=None):
