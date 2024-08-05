@@ -44,7 +44,7 @@ def get_stars(
     date="2025:001",
 ):
     # Make test results reproducible
-    np.random.seed(int(ra * 100 + dec * 10 + roll))
+    np.random.seed(int(abs(ra) * 100 + abs(dec) * 10 + abs(roll)))
 
     if select is None:
         select = slice(None, 8)
