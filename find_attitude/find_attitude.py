@@ -474,7 +474,7 @@ def get_min_stars(constraints):
         # Typically where an estimated attitude is supplied
         min_stars = 2
     elif len(constraints.healpix_indices) < npix / 10:
-        # Typically for normal_sun=True
+        # Typically for a pitch annulus in normal sun mode
         min_stars = 3
     else:
         min_stars = 4
