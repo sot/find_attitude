@@ -578,7 +578,9 @@ def find_matching_agasc_ids(
     else:
         func = _find_matching_agasc_ids_three_or_more_stars
 
-    return func(aca_pairs, agasc_pairs_file, g_dist_match, tolerance, constraints)
+    out = func(aca_pairs, agasc_pairs_file, g_dist_match, tolerance, constraints)
+    logger.info(f"Found {len(out)} possible AGASC-ID to star index maps")
+    return out
 
 
 def _find_matching_agasc_ids_two_stars(
@@ -596,6 +598,7 @@ def _find_matching_agasc_ids_two_stars(
     if g_dist_match is not None:
         raise ValueError("g_dist_match must be None for two star matching")
 
+    logger.info(f"Opening AGASC pairs file {agasc_pairs_file}")
     with tables.open_file(agasc_pairs_file, "r") as h5:
         agasc_pairs = h5.root.data
         ap = get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints)
@@ -888,11 +891,11 @@ def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
         else:
             solutions.append(solution)
 
-    _update_solutions(solutions, stars)
+    _update_solutions(solutions, stars, min_stars)
     return solutions
 
 
-def _update_solutions(solutions, stars):
+def _update_solutions(solutions, stars, min_stars):
     for sol in solutions:
         summ = Table(stars, masked=True)
 
@@ -928,8 +931,8 @@ def _update_solutions(solutions, stars):
                 summ[name].format = format
         sol["summary"] = summ
 
-        # Need at least 4 stars with radial fit residual < 3 arcsec
-        sol["bad_fit"] = np.sum(dr < 3.0) < 4
+        # Need at least min_stars stars with radial fit residual < 3 arcsec
+        sol["bad_fit"] = np.sum(dr < 3.0) < min_stars
 
 
 def get_healpix_indices_within_annulus(

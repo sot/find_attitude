@@ -29,7 +29,7 @@ class Constraints:
     normal_sun_pitch : float
         Pitch angle of normal sun in degrees (default=90.0). E.g. 160.0 for offset NSM.
     off_nom_roll_max : float or None
-        Maximum off-nominal roll angle in degrees (default=20.0)
+        Maximum off-nominal roll angle in degrees (default=2.0)
     date : CxoTimeLike
         Date for normal sun calculation (default=now)
     """
@@ -39,7 +39,7 @@ class Constraints:
     normal_sun: bool = False
     normal_sun_radius: float = 1.5
     normal_sun_pitch: float = 90.0
-    off_nom_roll_max: float | None = 20.0
+    off_nom_roll_max: float | None = 2.0
     date: CxoTimeLike = None
 
     @functools.cached_property
@@ -120,7 +120,7 @@ class Constraints:
         ok = abs(off_nom_roll) <= self.off_nom_roll_max
         if not ok:
             logger.info(
-                f"Off-nominal roll {off_nom_roll:.2f} exceeds maximum"
+                f"Att {q_att} off-nominal roll {off_nom_roll:.2f} exceeds maximum"
                 f" {self.off_nom_roll_max:.2f}"
             )
         return ok

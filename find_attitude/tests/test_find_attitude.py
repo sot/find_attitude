@@ -203,6 +203,8 @@ def test_multiple_solutions():
 def check_output(solutions, stars, ra, dec, roll):
     logger.debug("*********************************************")
     logger.debug("")
+
+    assert len(solutions) > 0
     for solution in solutions:
         att_fit = solution["att_fit"]
 
