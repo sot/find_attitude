@@ -30,6 +30,12 @@ from ska_helpers.utils import set_log_level
 
 from find_attitude.constraints import Constraints
 
+# Minimum number of stars required for different constraints.
+# MIN_STARS_ATT_CONSTRAINT can be set to 2 if necessary but this is not recommended.
+MIN_STARS_NO_CONSTRAINTS = 4
+MIN_STARS_ATT_CONSTRAINT = 3
+MIN_STARS_PITCH_CONSTRAINT = 3
+
 DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
 
 # Get the pre-made list of distances between AGASC stars.  If AGASC_PAIRS_FILE env var
@@ -465,19 +471,19 @@ def get_min_stars(constraints):
     constraints : Constraints object or None
         Attitude, normal sun, and date constraints if available
     """
-    # Formula for number of pixels for nside
-    npix = get_agasc_pairs_attribute("healpix_nside") ** 2 * 12
+    nside = get_agasc_pairs_attribute("healpix_nside")
+    npix = astropy_healpix.nside_to_npix(nside)
 
     if constraints is None or constraints.healpix_indices is None:
-        min_stars = 4
+        min_stars = MIN_STARS_NO_CONSTRAINTS
     elif len(constraints.healpix_indices) < npix / 100:
         # Typically where an estimated attitude is supplied
-        min_stars = 2
+        min_stars = MIN_STARS_ATT_CONSTRAINT
     elif len(constraints.healpix_indices) < npix / 10:
         # Typically for a pitch annulus in normal sun mode
-        min_stars = 3
+        min_stars = MIN_STARS_PITCH_CONSTRAINT
     else:
-        min_stars = 4
+        min_stars = MIN_STARS_NO_CONSTRAINTS
 
     return min_stars
 
