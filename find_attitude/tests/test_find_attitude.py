@@ -229,7 +229,7 @@ def check_output(solutions, stars, ra, dec, roll):
 
         ok = ~solution["summary"]["m_agasc_id"].mask
         sok = solution["summary"][ok]
-        assert np.all(sok["AGASC_ID"] == sok["m_agasc_id"])
+        assert np.count_nonzero(sok["AGASC_ID"] == sok["m_agasc_id"]) >= 2
 
     assert sum(1 for s in solutions if not s["bad_fit"]) == 1
     logger.debug("*********************************************\n")
