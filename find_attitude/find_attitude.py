@@ -6,11 +6,19 @@ import os
 from itertools import product
 from pathlib import Path
 
+# Squelch the useless warning below prior to import. Since this application
+# does not dealing with image data we don't worry about silencing these.
+# WARNING: imaging routines will not be available,
+# failed to import sherpa.image.ds9_backend due to
+# 'RuntimeErr: DS9Win unusable: Could not find ds9 on your PATH'
+logging.getLogger("sherpa.image").setLevel(logging.ERROR)
+
 import agasc
 import astropy.units as u
 import astropy_healpix
 import networkx as nx
 import numpy as np
+import sherpa.ui
 import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
@@ -18,6 +26,7 @@ from chandra_aca.transform import eci_to_radec, radec_to_yagzag
 from cxotime import CxoTimeLike
 from Quaternion import Quat
 from ska_helpers.logging import basic_logger
+from ska_helpers.utils import set_log_level
 
 from find_attitude.constraints import Constraints
 
@@ -741,22 +750,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None)
     # Sherpa model global, leave this alone.
     global yagzag  # noqa: PLW0602
 
-    # Squelch the useless warning below prior to import. Since this application
-    # does not dealing with image data we don't worry about silencing these.
-    # WARNING: imaging routines will not be available,
-    # failed to import sherpa.image.ds9_backend due to
-    # 'RuntimeErr: DS9Win unusable: Could not find ds9 on your PATH'
-    logging.getLogger("sherpa.image").setLevel(logging.ERROR)
-
-    import agasc
-    from sherpa import ui
-
-    # Set sherpa logger to same level as local logger
-    sherpa_logger = logging.getLogger("sherpa")
-    sherpa_logger.setLevel(logger.level)
-    for hdlr in sherpa_logger.handlers:
-        hdlr.setLevel(logger.level)
-
+    logger.info(f"Finding attitude for {agasc_id_star_map} stars")
     star_indices = list(agasc_id_star_map.values())
     yags = yags[star_indices]
     zags = zags[star_indices]
@@ -793,6 +787,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None)
     roll = np.degrees(m_ang - s_ang)
 
     y = np.concatenate([yags, zags])
+    ui = sherpa.ui
     ui.load_arrays(1, np.arange(len(y)), y, np.ones(len(y)))
     ui.load_user_model(yag_zag, "yagzag")
     ui.add_user_pars("yagzag", ["dra", "ddec", "droll"])
@@ -822,11 +817,18 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None)
         "statval": fit_results.statval,
         "agasc_id_star_map": agasc_id_star_map,
     }
+    logger.info(f"Found attitude {att_fit} with statval {fit_results.statval}")
 
     return out
 
 
-def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
+def find_attitude_solutions(
+    stars,
+    tolerance=2.5,
+    constraints=None,
+    log_level=None,
+    sherpa_log_level="WARNING",
+):
     """
     Find attitude solutions given an input table of star data.
 
@@ -849,10 +851,23 @@ def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
     :param tolerance: matching tolerance (arcsec, default=2.5)
     :param constraints: Constraints object or None
         Attitude, normal sun, and date constraints if available
+    :param log_level: logging level for find_attidue functions
+    :param sherpa_log_level: logging level for sherpa
 
     :returns: list of solutions, where each solution is a dict
     """
+    with (
+        set_log_level(logger, log_level),
+        set_log_level(logging.getLogger("sherpa"), sherpa_log_level),
+    ):
+        return _find_attitude_solutions(stars, tolerance, constraints)
 
+
+def _find_attitude_solutions(
+    stars,
+    tolerance=2.5,
+    constraints=None,
+):
     min_stars = get_min_stars(constraints)
     if len(stars) < min_stars:
         raise ValueError(
@@ -886,9 +901,18 @@ def find_attitude_solutions(stars, tolerance=2.5, constraints=None):
         for prev_solution in solutions:
             if agasc_ids.intersection(prev_solution["agasc_ids"]):
                 if solution["statval"] < prev_solution["statval"]:
+                    logger.info(
+                        f"Updating solution for {prev_solution['agasc_ids']} with "
+                        f"{agasc_ids} for better statval {solution['statval']}"
+                    )
                     prev_solution.update(solution)
+                else:
+                    logger.info(f"Skipping solution for {agasc_ids} (worse statval)")
                 break
         else:
+            logger.info(
+                f"Adding solution for {agasc_ids} with statval {solution['statval']}"
+            )
             solutions.append(solution)
 
     _update_solutions(solutions, stars, min_stars)
