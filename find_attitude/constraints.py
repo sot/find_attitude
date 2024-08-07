@@ -19,24 +19,24 @@ class Constraints:
     Parameters
     ----------
     att : QuatLike or None
-        If supplied, restrict to cone within ``attitude_radius`` of attitude quaternion
-    att_radius : float
-        Radius of the attitude cone in degrees (default=4.0)
+        Estimated attitude, assumed to be within ``att_err`` of true attitude.
+    att_err : float
+        Radial uncertainty of the attitude in degrees (default=4.0).
     pitch : float | None
-        If not None, constrain sun pitch angle to ``pitch +/- pitch_radius`` degrees.
+        If not None, constrain sun pitch angle to ``pitch +/- pitch_err`` degrees.
         Default is None => no pitch constraint.
-    pitch_radius : float
-        Radius of the pitch annulus in degrees (default=1.5)
+    pitch_err : float
+        Uncertainty in pitch in degrees (default=1.5).
     off_nom_roll_max : float or None
-        Maximum off-nominal roll angle in degrees (default=2.0)
+        Maximum off-nominal roll angle in degrees (default=2.0).
     date : CxoTimeLike
-        Date for normal sun calculation (default=now)
+        Date for sun position calculation (default=now).
     """
 
     att: QuatLike | None = None
-    att_radius: float = 4.0
+    att_err: float = 4.0
     pitch: float | None = None
-    pitch_radius: float = 1.5
+    pitch_err: float = 1.5
     off_nom_roll_max: float | None = 2.0
     date: CxoTimeLike = None
 
@@ -44,9 +44,9 @@ class Constraints:
     def healpix_indices(self) -> np.ndarray | None:
         """Return a list of healpix indices based on the attitude and date.
 
-        If ``att`` is not None then restrict to the cone within ``att_radius`` of the
+        If ``att`` is not None then restrict to the cone within ``att_err`` of the
         attitude quaternion.  If ``pitch`` is not None then restrict to an annulus
-        ``pitch +/- pitch_radius`` corresponding to the sun pitch angle. Both can be
+        ``pitch +/- pitch_err`` corresponding to the sun pitch angle. Both can be
         supplied at the same time.
 
         If both ``att`` and ``pitch`` are None then return ``None``.
@@ -77,14 +77,14 @@ class Constraints:
             idxs = hp.cone_search_lonlat(
                 att.ra * u.deg,
                 att.dec * u.deg,
-                (self.att_radius + max_aca_radius) * u.deg,
+                (self.att_err + max_aca_radius) * u.deg,
             )
 
         if self.pitch is not None:
-            # Get healpix indices of a cone out to pitch +/- pitch_radius.
+            # Get healpix indices of a cone out to pitch +/- pitch_err.
             sun_ra, sun_dec = ska_sun.position(self.date)
-            radius0 = self.pitch - self.pitch_radius - max_aca_radius
-            radius1 = self.pitch + self.pitch_radius + max_aca_radius
+            radius0 = self.pitch - self.pitch_err - max_aca_radius
+            radius1 = self.pitch + self.pitch_err + max_aca_radius
             idxs_nsun = get_healpix_indices_within_annulus(
                 sun_ra,
                 sun_dec,
