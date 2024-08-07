@@ -5,12 +5,17 @@ import agasc
 import astropy.units as u
 import numpy as np
 import pytest
+import ska_sun
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
 from chandra_aca.transform import radec_to_yagzag, yagzag_to_pixels
+from cxotime import CxoTime
 from Quaternion import Quat
+from ska_helpers.utils import random_radec_in_cone
 
+import find_attitude.find_attitude as fafa
 from find_attitude import (
+    Constraints,
     find_attitude_solutions,
     get_agasc_pairs_attribute,
     get_dists_yag_zag,
@@ -124,6 +129,125 @@ def remove_close_pairs(stars, radius: u.Quantity, both=False):
     stars.remove_rows(list(idxs_drop))
 
 
+def get_random_attitude(constraints: Constraints) -> Quat:
+    """
+    Generates a random attitude based on the given constraints.
+
+    Parameters
+    ----------
+    constraints : Constraints
+        The constraints for generating the attitude.
+
+    Returns
+    -------
+    Quat
+        Randomly generated attitude.
+
+    """
+    date = constraints.date
+
+    # Back off from constraint off_nom_roll_max by 0.5 degrees to avoid randomly
+    # generating an attitude that is too close to the constraint.
+    onrm = max(0.0, constraints.off_nom_roll_max - 0.5)
+    off_nom_roll = np.random.uniform(-onrm, onrm)
+
+    if constraints.att is not None:
+        att0 = Quat(constraints.att)
+        # Back off from constraint att_err by 0.5 degrees (same as off_nom_roll).
+        att_err = max(0.0, constraints.att_err - 0.5)
+        ra, dec = random_radec_in_cone(att0.ra, att0.dec, att_err)
+        roll0 = ska_sun.nominal_roll(ra, dec, time=date)
+        roll = roll0 + off_nom_roll
+        att = Quat([ra, dec, roll])
+
+    elif constraints.pitch is not None:
+        pitch_err = max(0.0, constraints.pitch_err - 0.5)
+        d_pitch = np.random.uniform(pitch_err, pitch_err)
+        pitch = constraints.pitch + d_pitch
+        yaw = np.random.uniform(0, 360)
+        att = ska_sun.get_att_for_sun_pitch_yaw(
+            pitch, yaw, time=date, off_nom_roll=off_nom_roll
+        )
+
+    else:
+        ra = np.random.uniform(0, 360)
+        dec = np.rad2deg(np.arccos(np.random.uniform(-1, 1))) - 90
+        roll = ska_sun.nominal_roll(ra, dec, time=date) + off_nom_roll
+        att = Quat([ra, dec, roll])
+
+    return att
+
+
+def check_n_stars(n_stars, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0):
+    # Get a random sun-pointed attitude anywhere on the sky for a time in 2024 or 2025
+    constraints_all_sky = Constraints(
+        off_nom_roll_max=0.0,
+        date=CxoTime("2024:001") + np.random.uniform(0, 2) * u.yr,
+    )
+    att_est = get_random_attitude(constraints_all_sky)
+
+    # Now run find attitude test with this constraint where the test attitude will be
+    # randomized consistent with the constraints. This selects stars at an attitude
+    # which is randomly displaced from the estimated attitude.
+    constraints = Constraints(
+        off_nom_roll_max=off_nom_roll_max,
+        date=constraints_all_sky.date,
+        att=att_est,
+        att_err=att_err,
+    )
+    check_random_all_sky(
+        constraints=constraints,
+        tolerance=tolerance,
+        min_stars=n_stars,
+        max_stars=n_stars,
+    )
+
+
+def check_random_all_sky(
+    sigma_1axis=1.0,
+    sigma_mag=0.2,
+    brightest=True,
+    constraints=None,
+    min_stars=4,
+    max_stars=8,
+    tolerance=3.5,
+    log_level="WARNING",
+    sherpa_log_level="WARNING",
+):
+    if constraints is None:
+        constraints = Constraints(off_nom_roll_max=20, date="2025:001")
+
+    n_stars = np.random.randint(min_stars, max_stars + 1)
+
+    while True:
+        att = get_random_attitude(constraints)
+        stars = get_stars(
+            att.ra,
+            att.dec,
+            att.roll,
+            sigma_1axis=sigma_1axis,
+            sigma_mag=sigma_mag,
+            brightest=brightest,
+            date=constraints.date,
+        )
+        if len(stars) >= n_stars:
+            break
+
+    solutions = []
+    solutions = find_attitude_solutions(
+        stars,
+        tolerance=tolerance,
+        constraints=constraints,
+        log_level=log_level,
+        sherpa_log_level=sherpa_log_level,
+    )
+
+    for solution in solutions:
+        solution["att"] = att
+
+    check_output(solutions, stars, att.ra, att.dec, att.roll)
+
+
 def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
     while True:
         ra = np.random.uniform(0, 360)
@@ -157,27 +281,6 @@ def test_overlapping_distances(tolerance=3.0):
 
     solutions = find_attitude_solutions(stars)
     check_output(solutions, stars, ra, dec, roll)
-
-
-def _test_random(n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True):
-    np.random.seed(0)
-    for _ in range(n_iter):
-        global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
-        ra = np.random.uniform(0, 360)
-        dec = np.random.uniform(-90, 90)
-        roll = np.random.uniform(0, 360)
-        n_stars = np.random.randint(4, 8)
-        stars = get_stars(
-            ra,
-            dec,
-            roll,
-            sigma_1axis=sigma_1axis,
-            sigma_mag=sigma_mag,
-            brightest=brightest,
-        )
-        stars = stars[:n_stars]
-        solutions = find_attitude_solutions(stars)
-        check_output(solutions, stars, ra, dec, roll)
 
 
 def test_multiple_solutions():
@@ -233,6 +336,78 @@ def check_output(solutions, stars, ra, dec, roll):
 
     assert sum(1 for s in solutions if not s["bad_fit"]) == 1
     logger.debug("*********************************************\n")
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_att_constraint_3_stars(seed):
+    np.random.seed(seed)
+    check_n_stars(n_stars=3, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0)
+
+
+def test_att_constraint_2_stars():
+    """Test once for code coverage but do not expect this to always succeed"""
+    np.random.seed(10)
+    try:
+        fafa.MIN_STARS_ATT_CONSTRAINT = 2
+        check_n_stars(n_stars=2, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0)
+    finally:
+        fafa.MIN_STARS_ATT_CONSTRAINT = 3
+
+
+@pytest.mark.parametrize("seed", range(20, 25))
+def test_no_constraints_4_to_8_stars(seed):
+    np.random.seed(seed)
+    check_random_all_sky(constraints=None, tolerance=3.5)
+
+
+@pytest.mark.parametrize("seed", range(30, 35))
+def test_pitch_constraint_3_stars(seed):
+    constraints = Constraints(
+        off_nom_roll_max=1.0,
+        date=CxoTime("2024:001") + np.random.uniform(0, 2) * u.yr,
+        pitch=160,
+        pitch_err=1.5,
+    )
+    check_random_all_sky(
+        constraints=constraints, tolerance=4.0, min_stars=3, max_stars=3
+    )
+
+
+def test_nsm_2024036():
+    att_nsm = Quat([-0.062141268, -0.054177772, 0.920905180, 0.380968348])
+    date_nsm = "2024:036:03:02:38.343"
+    slots = [3, 7]
+    stars = get_stars_from_maude(date_nsm, slots=slots)
+    constraints = Constraints(
+        off_nom_roll_max=1.0,
+        date=date_nsm,
+        att=att_nsm,
+        att_err=5.0,
+    )
+
+    fafa.MIN_STARS_ATT_CONSTRAINT = 2
+    try:
+        sols = find_attitude_solutions(
+            stars,
+            tolerance=2.5,
+            constraints=constraints,
+            log_level="WARNING",
+            sherpa_log_level="WARNING",
+        )
+    finally:
+        fafa.MIN_STARS_ATT_CONSTRAINT = 3
+    assert len(sols) == 1
+    assert not sols[0]["bad_fit"]
+    att_exp = Quat([-0.11128925, -0.10379516, 0.90382672, 0.39992314])
+    dq = att_exp.dq(sols[0]["att_fit"])
+    assert abs(dq.pitch) < 1.0 / 3600
+    assert abs(dq.yaw) < 1.0 / 3600
+    assert abs(dq.roll0) < 60.0 / 3600
+
+    dq = att_nsm.dq(sols[0]["att_fit"])
+    assert abs(dq.pitch) < 4.0
+    assert abs(dq.yaw) < 4.0
+    assert abs(dq.roll0) < 10.0
 
 
 def test_ra_dec_roll(
@@ -411,7 +586,3 @@ def test_at_times():
     )  # Telem aoattqt* are wrong
     for time, qatt in zip(times, qatts):
         check_at_time(time, qatt)
-
-
-def test_nsm_constraint():
-    """ """
