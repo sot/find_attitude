@@ -156,7 +156,9 @@ def get_stars_from_text(text):
     return stars[ok]
 
 
-def get_stars_from_maude(date: CxoTimeLike = None, dt: float = 11.0):
+def get_stars_from_maude(
+    date: CxoTimeLike = None, dt: float = 11.0, slots: list | None = None
+):
     """Get star data from MAUDE for a given date.
 
     This gets ``dt`` seconds of star data ending at ``date``. If ``date`` is None then
@@ -169,6 +171,8 @@ def get_stars_from_maude(date: CxoTimeLike = None, dt: float = 11.0):
         Date for which to get star data
     dt : float
         Time interval (seconds) for which to get star data (default=11.0)
+    slots : list of int, optional
+        List of slots to get star data for (default is all 8 slots)
 
     Returns
     -------
@@ -179,10 +183,13 @@ def get_stars_from_maude(date: CxoTimeLike = None, dt: float = 11.0):
     import maude
     from cxotime import CxoTime
 
+    if slots is None:
+        slots = list(range(8))
+
     msids = []
-    msids.extend([f"aoacyan{ii}" for ii in range(8)])
-    msids.extend([f"aoaczan{ii}" for ii in range(8)])
-    msids.extend([f"aoacmag{ii}" for ii in range(8)])
+    msids.extend([f"aoacyan{ii}" for ii in slots])
+    msids.extend([f"aoaczan{ii}" for ii in slots])
+    msids.extend([f"aoacmag{ii}" for ii in slots])
     stop = CxoTime(date)
     start = stop - dt * u.s
     dat = maude.get_msids(msids, start=start, stop=stop)
@@ -193,7 +200,7 @@ def get_stars_from_maude(date: CxoTimeLike = None, dt: float = 11.0):
         values = result["values"]
         if len(values) == 0:
             # Missing data, this should no happen but just in case
-            value = -9999.0
+            value = 9999.0
         elif len(values) < 6:
             value = np.median(values)
         else:
@@ -203,14 +210,14 @@ def get_stars_from_maude(date: CxoTimeLike = None, dt: float = 11.0):
         out[msid] = value
     tbl = Table()
 
-    tbl["slot"] = np.arange(8)
-    tbl["YAG"] = [out[f"AOACYAN{ii}"] for ii in range(8)]
-    tbl["ZAG"] = [out[f"AOACZAN{ii}"] for ii in range(8)]
-    tbl["MAG_ACA"] = [out[f"AOACMAG{ii}"] for ii in range(8)]
+    tbl["slot"] = slots
+    tbl["YAG"] = [out[f"AOACYAN{ii}"] for ii in slots]
+    tbl["ZAG"] = [out[f"AOACZAN{ii}"] for ii in slots]
+    tbl["MAG_ACA"] = [out[f"AOACMAG{ii}"] for ii in slots]
     tbl.meta["date_solution"] = (stop - dt * u.s / 2).date
 
-    # Filter non-tracking slots
-    ok = (tbl["YAG"] > -3200) | (tbl["ZAG"] > -3200)
+    # Filter non-tracking slots which have YAG, ZAG = 3276.8
+    ok = (tbl["YAG"] < 3200) & (tbl["ZAG"] < 3200)
     tbl = tbl[ok]
     for name in ["YAG", "ZAG", "MAG_ACA"]:
         tbl[name].format = ".2f"
