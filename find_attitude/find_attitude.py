@@ -684,9 +684,10 @@ def _find_matching_agasc_ids_three_or_more_stars(
 
     logger.info("Done with graph matching")
 
-    # Only accept solutions with the maximum number of nodes.
-    max_clique_nodes = max(len(c) for c in out)
-    out = [c for c in out if len(c) == max_clique_nodes]
+    if len(out) > 0:
+        # Only accept solutions with the maximum number of nodes.
+        max_clique_nodes = max(len(c) for c in out)
+        out = [c for c in out if len(c) == max_clique_nodes]
 
     return out
 
@@ -807,8 +808,11 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None)
     ui.freeze(yagzag.droll)
     ui.fit()
 
-    ui.thaw(yagzag.droll)
-    ui.fit()
+    # Only need to fit roll for more than 2 stars. With 2 stars, original roll is exact.
+    if len(agasc_stars) > 2:
+        ui.thaw(yagzag.droll)
+        ui.fit()
+
     fit_results = ui.get_fit_results()
     m_yags, m_zags, att_fit = _yag_zag(
         yagzag.dra.val, yagzag.ddec.val, yagzag.droll.val
@@ -961,8 +965,8 @@ def _update_solutions(solutions, stars, min_stars):
                 summ[name].format = format
         sol["summary"] = summ
 
-        # Need at least min_stars stars with radial fit residual < 3 arcsec
-        sol["bad_fit"] = np.sum(dr < 3.0) < min_stars
+        # Need at least min_stars stars with radial fit residual < 5.0 arcsec
+        sol["bad_fit"] = np.sum(dr < 5.0) < min_stars
 
 
 def get_healpix_indices_within_annulus(
