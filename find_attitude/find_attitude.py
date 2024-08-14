@@ -214,7 +214,7 @@ def get_stars_from_maude(
     tbl["YAG"] = [out[f"AOACYAN{ii}"] for ii in slots]
     tbl["ZAG"] = [out[f"AOACZAN{ii}"] for ii in slots]
     tbl["MAG_ACA"] = [out[f"AOACMAG{ii}"] for ii in slots]
-    tbl.meta["date_solution"] = (stop - dt * u.s / 2).date
+    tbl.meta["date"] = (stop - dt * u.s / 2)
 
     # Filter non-tracking slots which have YAG, ZAG = 3276.8
     ok = (tbl["YAG"] < 3200) & (tbl["ZAG"] < 3200)
