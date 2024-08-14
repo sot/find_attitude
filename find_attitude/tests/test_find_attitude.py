@@ -155,7 +155,7 @@ def get_random_attitude(constraints: Constraints) -> Quat:
         att0 = Quat(constraints.att)
         # Back off from constraint att_err by 0.5 degrees (same as off_nom_roll).
         att_err = max(0.0, constraints.att_err - 0.5)
-        ra, dec = random_radec_in_cone(att0.ra, att0.dec, att_err)
+        ra, dec = random_radec_in_cone(att0.ra, att0.dec, angle=att_err)
         roll0 = ska_sun.nominal_roll(ra, dec, time=date)
         roll = roll0 + off_nom_roll
         att = Quat([ra, dec, roll])
@@ -425,6 +425,19 @@ def test_ra_dec_roll(
     )
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     check_output(solutions, stars, ra, dec, roll)
+    summary = solutions[0]["summary"]
+    assert summary.pformat_all() == [
+        " AGASC_ID     RA      DEC      YAG    YAG_ERR   ZAG    ZAG_ERR MAG_ACA MAG_ERROR  m_yag    m_zag   m_mag   dy    dz   dr  m_agasc_id",
+        "---------- -------- -------- -------- ------- -------- ------- ------- --------- -------- -------- ----- ----- ----- ---- ----------",
+        "1229590664 113.9040 -75.5443   277.57    0.34  1697.60   -0.19    7.16     -0.27   277.38  1697.49  7.42  0.19  0.11 0.22 1229590664",
+        "1229598320 117.5286 -75.5923   311.77    0.36 -1558.71   -0.55    8.33      0.09   311.57 -1558.42  8.24  0.20 -0.30 0.36 1229598320",
+        "1229593496 113.9002 -75.1111  1829.68    0.14  1847.63   -0.39    8.73      0.26  1829.68  1847.77  8.47  0.00 -0.14 0.14 1229593496",
+        "1229592728 114.4727 -75.4207   765.52   -0.54  1226.08   -0.25    8.57      0.07   766.21  1226.08  8.50 -0.69 -0.00 0.69 1229592728",
+        "1229601872 116.9575 -76.1410 -1681.19    0.35 -1131.50   -0.39    8.69      0.02 -1681.39 -1131.36  8.68  0.20 -0.14 0.24 1229601872",
+        "1204815872 115.5212 -74.9482  2535.86    0.39   392.52   -0.13    8.69     -0.06  2535.63   392.40  8.75  0.23  0.11 0.26 1204815872",
+        "1229593296 113.5808 -75.0731  1936.75   -0.16  2155.14   -0.53    8.99      0.06  1937.06  2155.42  8.93 -0.31 -0.29 0.42 1229593296",
+        "1229598408 115.6303 -76.2177 -2018.17    0.33    -5.81    0.38    8.99     -0.18 -2018.36    -6.46  9.17  0.18  0.64 0.67 1229598408",
+    ]
 
 
 def test_get_stars_from_greta():

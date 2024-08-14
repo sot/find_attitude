@@ -941,7 +941,7 @@ def _update_solutions(solutions, stars, min_stars):
         summ = Table(stars, masked=True)
 
         indices = list(sol["agasc_id_star_map"].values())
-        for name in ("m_yag", "dy", "m_zag", "dz", "dr"):
+        for name in ("m_yag", "m_zag", "m_mag", "dy", "dz", "dr"):
             summ[name] = MaskedColumn([-99.0] * len(summ), name=name, mask=True)
         summ["m_agasc_id"] = MaskedColumn(
             [-99] * len(summ), name="m_agasc_id", mask=True
@@ -955,14 +955,18 @@ def _update_solutions(solutions, stars, min_stars):
             (sol["yags"] - sol["m_yags"]) ** 2 + (sol["zags"] - sol["m_zags"]) ** 2
         )
         summ["dr"][indices] = dr
-        summ["m_agasc_id"][indices] = list(sol["agasc_id_star_map"].keys())
+        m_agasc_ids = list(sol["agasc_id_star_map"].keys())
+        summ["m_agasc_id"][indices] = m_agasc_ids
+
+        stars = agasc.get_stars(m_agasc_ids)
+        summ["m_mag"][indices] = [star["MAG_ACA"] for star in stars]
 
         for name in summ.colnames:
             if name in ("RA", "DEC"):
                 format = "{:.4f}"
             elif "agasc" in name.lower():
                 format = "{:d}"
-            elif name in ("m_yag", "dy", "m_zag", "dz", "dr"):
+            elif name in ("m_yag", "m_zag", "m_mag", "dy", "dz", "dr"):
                 format = "{:.2f}"
             elif name in ("YAG", "YAG_ERR", "ZAG", "ZAG_ERR", "MAG_ACA", "MAG_ERROR"):
                 format = "{:.2f}"
