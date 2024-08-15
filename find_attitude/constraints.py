@@ -29,8 +29,14 @@ class Constraints:
         Uncertainty in pitch in degrees (default=1.5).
     off_nom_roll_max : float or None
         Maximum off-nominal roll angle in degrees (default=2.0).
+    min_stars : int or None
+        Minimum number of stars required for a valid solution. Default is None, meaning
+        the minimum number of stars is determined from the constraints. Key use case for
+        this parameter is to set it to 2 for a two-star solution.
+    mag_err : float or None
+        Faint mag threshold for filtering candidate star pairs (default=1.5).
     date : CxoTimeLike
-        Date for sun position calculation (default=now).
+        Date for sun position calculation (default=NOW).
     """
 
     att: QuatLike | None = None
@@ -38,6 +44,8 @@ class Constraints:
     pitch: float | None = None
     pitch_err: float = 1.5
     off_nom_roll_max: float | None = 2.0
+    min_stars: int | None = None
+    mag_err: float | None = 1.5
     date: CxoTimeLike = None
 
     @functools.cached_property

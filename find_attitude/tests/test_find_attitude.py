@@ -178,7 +178,9 @@ def get_random_attitude(constraints: Constraints) -> Quat:
     return att
 
 
-def check_n_stars(n_stars, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0):
+def check_n_stars(
+    n_stars, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0, min_stars=None
+):
     # Get a random sun-pointed attitude anywhere on the sky for a time in 2024 or 2025
     constraints_all_sky = Constraints(
         off_nom_roll_max=0.0,
@@ -194,6 +196,7 @@ def check_n_stars(n_stars, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0):
         date=constraints_all_sky.date,
         att=att_est,
         att_err=att_err,
+        min_stars=min_stars,
     )
     check_random_all_sky(
         constraints=constraints,
@@ -347,11 +350,7 @@ def test_att_constraint_3_stars(seed):
 def test_att_constraint_2_stars():
     """Test once for code coverage but do not expect this to always succeed"""
     np.random.seed(10)
-    try:
-        fafa.MIN_STARS_ATT_CONSTRAINT = 2
-        check_n_stars(n_stars=2, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0)
-    finally:
-        fafa.MIN_STARS_ATT_CONSTRAINT = 3
+    check_n_stars(n_stars=2, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0)
 
 
 @pytest.mark.parametrize("seed", range(20, 25))
@@ -383,19 +382,17 @@ def test_nsm_2024036():
         date=date_nsm,
         att=att_nsm,
         att_err=5.0,
+        min_stars=2,
     )
 
-    fafa.MIN_STARS_ATT_CONSTRAINT = 2
-    try:
-        sols = find_attitude_solutions(
-            stars,
-            tolerance=2.5,
-            constraints=constraints,
-            log_level="WARNING",
-            sherpa_log_level="WARNING",
-        )
-    finally:
-        fafa.MIN_STARS_ATT_CONSTRAINT = 3
+    sols = find_attitude_solutions(
+        stars,
+        tolerance=2.5,
+        constraints=constraints,
+        log_level="WARNING",
+        sherpa_log_level="WARNING",
+    )
+
     assert len(sols) == 1
     assert not sols[0]["bad_fit"]
     att_exp = Quat([-0.11128925, -0.10379516, 0.90382672, 0.39992314])

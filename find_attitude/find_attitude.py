@@ -30,13 +30,9 @@ from ska_helpers.utils import set_log_level
 
 from find_attitude.constraints import Constraints
 
-# Minimum number of stars required for different constraints.
-# MIN_STARS_ATT_CONSTRAINT can be set to 2 if necessary but this is not recommended.
-MIN_STARS_NO_CONSTRAINTS = 4
-MIN_STARS_ATT_CONSTRAINT = 3
-MIN_STARS_PITCH_CONSTRAINT = 3
-
-DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
+# Default faint mag threshold for filtering candidate star pairs. Only applies if no
+# constraints are provided.
+DELTA_MAG_DEFAULT = 1.5
 
 # Get the pre-made list of distances between AGASC stars.  If AGASC_PAIRS_FILE env var
 # is defined then use that (for test/development).
@@ -436,6 +432,8 @@ def get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints) -> Table:
 
     logger.info("Getting matches from file")
     ap_list = []
+    delta_mag = DELTA_MAG_DEFAULT if constraints is None else constraints.mag_err
+
     for i0, i1, dist, mag0, mag1 in zip(idx0s, idx1s, dists, mag0s, mag1s):
         logger.debug("Getting matches from file {} {} {}".format(i0, i1, dist))
         ap = agasc_pairs.read_where(
@@ -448,8 +446,8 @@ def get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints) -> Table:
             ap = ap[ok]
 
         # Filter AGASC pairs based on star pairs magnitudes
-        if DELTA_MAG is not None:
-            max_mag = max(mag0, mag1) + DELTA_MAG
+        if delta_mag is not None:
+            max_mag = max(mag0, mag1) + delta_mag
             mag_ok = (ap["mag0"] / 1000.0 < max_mag) & (ap["mag1"] / 1000.0 < max_mag)
             ap = ap[mag_ok]
 
@@ -478,19 +476,20 @@ def get_min_stars(constraints):
     constraints : Constraints object or None
         Attitude, normal sun, and date constraints if available
     """
+    if constraints and constraints.min_stars is not None:
+        return constraints.min_stars
+
     nside = get_agasc_pairs_attribute("healpix_nside")
     npix = astropy_healpix.nside_to_npix(nside)
 
     if constraints is None or constraints.healpix_indices is None:
-        min_stars = MIN_STARS_NO_CONSTRAINTS
-    elif len(constraints.healpix_indices) < npix / 100:
-        # Typically where an estimated attitude is supplied
-        min_stars = MIN_STARS_ATT_CONSTRAINT
+        # No constraints or constraints do not restrict the healpix indices
+        min_stars = 4
     elif len(constraints.healpix_indices) < npix / 10:
-        # Typically for a pitch annulus in normal sun mode
-        min_stars = MIN_STARS_PITCH_CONSTRAINT
+        # Typically for a pitch annulus in normal sun mode or estimated attitude
+        min_stars = 3
     else:
-        min_stars = MIN_STARS_NO_CONSTRAINTS
+        min_stars = 4
 
     return min_stars
 
