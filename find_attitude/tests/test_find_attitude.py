@@ -13,7 +13,6 @@ from cxotime import CxoTime
 from Quaternion import Quat
 from ska_helpers.utils import random_radec_in_cone
 
-import find_attitude.find_attitude as fafa
 from find_attitude import (
     Constraints,
     find_attitude_solutions,

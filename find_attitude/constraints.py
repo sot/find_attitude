@@ -12,6 +12,7 @@ from Quaternion import Quat, QuatLike
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class Constraints:
     """Constraints on attitude for attitude solution.
