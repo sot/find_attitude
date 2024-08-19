@@ -851,6 +851,10 @@ def find_attitude_solutions(
     The input star table must have columns 'YAG' (arcsec), 'ZAG' (arcsec), and
     'MAG'.  There must be at least four stars for the matching algorithm to succeed.
 
+    This relies on a pre-computed star pair distance file that is created with
+    ``make_distances.py``.  This file is an HDF5 file with a table of pair distances
+    that is computed for a particular star epoch.
+
     The output is a list of solutions, where each solution is a dict with keys::
 
       summary : copy of input stars table with new columns of useful info

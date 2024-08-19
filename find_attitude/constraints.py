@@ -32,8 +32,9 @@ class Constraints:
         Maximum off-nominal roll angle in degrees (default=2.0).
     min_stars : int or None
         Minimum number of stars required for a valid solution. Default is None, meaning
-        the minimum number of stars is determined from the constraints. Key use case for
-        this parameter is to set it to 2 for a two-star solution.
+        the minimum number of stars is determined from the constraints in the
+        ``get_min_stars()`` function. Key use case for this parameter is to set it to 2
+        for a two-star solution.
     mag_err : float or None
         Faint mag threshold for filtering candidate star pairs (default=1.5).
     date : CxoTimeLike

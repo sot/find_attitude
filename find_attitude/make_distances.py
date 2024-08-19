@@ -14,7 +14,7 @@ MIN_ACA_DIST = 25.0 * u.arcsec  # 25 arcsec min separation (FFS won't find close
 MAX_ACA_DIST = 2.0 * u.deg  # degrees corner to corner (actual max is 7148 arcsec)
 MAX_MAG = 10.0  # Max mag to include in the distances file
 DATE_DISTANCES = "2025:001"  # Date for proper motion correction in distances
-HEALPIX_NSIDE = 64
+HEALPIX_NSIDE = 64  # Set to have approximately 1 square degree pixels (49152 on sky)
 HEALPIX_ORDER = "nested"
 SKA = os.environ["SKA"]
 
