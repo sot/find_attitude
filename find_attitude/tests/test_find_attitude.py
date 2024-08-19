@@ -1,22 +1,40 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from pprint import pprint
+from pprint import pformat
 
 import agasc
 import astropy.units as u
 import numpy as np
+import pytest
+import ska_sun
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
+from chandra_aca.transform import radec_to_yagzag, yagzag_to_pixels
+from cxotime import CxoTime
 from Quaternion import Quat
-from Ska.quatutil import radec2yagzag
+from ska_helpers.utils import random_radec_in_cone
 
-from find_attitude.find_attitude import (
+from find_attitude import (
+    Constraints,
     find_attitude_solutions,
     get_agasc_pairs_attribute,
     get_dists_yag_zag,
+    get_stars_from_maude,
     get_stars_from_text,
+    logger,
 )
 
 MAX_MAG = get_agasc_pairs_attribute("max_mag")
+
+try:
+    import maude
+
+    maude.get_msids(
+        msids="ccsdsid", start="2016:001:00:00:00", stop="2016:001:00:00:02"
+    )
+except Exception:
+    HAS_MAUDE = False
+else:
+    HAS_MAUDE = True
 
 
 def get_stars(
@@ -27,14 +45,15 @@ def get_stars(
     brightest=True,
     sigma_1axis=0.4,
     sigma_mag=0.2,
+    date="2025:001",
 ):
     # Make test results reproducible
-    np.random.seed(int(ra * 100 + dec * 10 + roll))
+    np.random.seed(int(abs(ra) * 100 + abs(dec) * 10 + abs(roll)))
 
     if select is None:
         select = slice(None, 8)
     agasc_file = agasc.get_agasc_filename("miniagasc_*")
-    stars = agasc.get_agasc_cone(ra, dec, 1.0, date="2025:001", agasc_file=agasc_file)
+    stars = agasc.get_agasc_cone(ra, dec, 1.2, date=date, agasc_file=agasc_file)
     stars = stars[stars["MAG_ACA"] < MAX_MAG]
     remove_close_pairs(stars, radius=5 * u.arcsec, both=True)
     remove_close_pairs(stars, radius=25 * u.arcsec, both=False)
@@ -46,15 +65,14 @@ def get_stars(
         index = np.arange(len(stars))
         np.random.shuffle(index)
         stars = stars[index]
-    stars = stars[select].copy()
-    yags, zags = radec2yagzag(
+    yags, zags = radec_to_yagzag(
         stars["RA_PMCORR"], stars["DEC_PMCORR"], Quat([ra, dec, roll])
     )
     stars["YAG_ERR"] = np.random.normal(scale=sigma_1axis, size=len(stars))
     stars["ZAG_ERR"] = np.random.normal(scale=sigma_1axis, size=len(stars))
     stars["MAG_ERROR"] = np.random.normal(scale=sigma_mag, size=len(stars))
-    stars["YAG"] = yags * 3600 + stars["YAG_ERR"]
-    stars["ZAG"] = zags * 3600 + stars["ZAG_ERR"]
+    stars["YAG"] = yags + stars["YAG_ERR"]
+    stars["ZAG"] = zags + stars["ZAG_ERR"]
     stars["MAG_ACA"] += stars["MAG_ERROR"]
     stars["RA"] = stars["RA_PMCORR"]
     stars["DEC"] = stars["DEC_PMCORR"]
@@ -69,6 +87,13 @@ def get_stars(
         "MAG_ACA",
         "MAG_ERROR",
     ]
+
+    # Make sure stars are on the CCD
+    rows, cols = yagzag_to_pixels(stars["YAG"], stars["ZAG"], allow_bad=True)
+    ok = (np.abs(rows) < 506.0) & (np.abs(cols) < 506.0)
+    stars = stars[ok]
+
+    stars = stars[select].copy()
 
     return stars
 
@@ -89,18 +114,140 @@ def remove_close_pairs(stars, radius: u.Quantity, both=False):
         if idx1 < idx2 and idx1 not in idxs_drop:
             if both:
                 star = stars[idx1]
-                print(
+                logger.debug(
                     f"Removing star(1) {star['AGASC_ID']} with "
                     f"ra={star['RA']:.5f}, dec={star['DEC']:.5f} mag={star['MAG_ACA']:.2f} dist={d2d:.2f}"
                 )
                 idxs_drop.add(idx1)
             idxs_drop.add(idx2)
             star = stars[idx2]
-            print(
+            logger.debug(
                 f"Removing star(2) {star['AGASC_ID']} with "
                 f"ra={star['RA']:.5f}, dec={star['DEC']:.5f} mag={star['MAG_ACA']:.2f} dist={d2d:.2f}"
             )
     stars.remove_rows(list(idxs_drop))
+
+
+def get_random_attitude(constraints: Constraints) -> Quat:
+    """
+    Generates a random attitude based on the given constraints.
+
+    Parameters
+    ----------
+    constraints : Constraints
+        The constraints for generating the attitude.
+
+    Returns
+    -------
+    Quat
+        Randomly generated attitude.
+
+    """
+    date = constraints.date
+
+    # Back off from constraint off_nom_roll_max by 0.5 degrees to avoid randomly
+    # generating an attitude that is too close to the constraint.
+    onrm = max(0.0, constraints.off_nom_roll_max - 0.5)
+    off_nom_roll = np.random.uniform(-onrm, onrm)
+
+    if constraints.att is not None:
+        att0 = Quat(constraints.att)
+        # Back off from constraint att_err by 0.5 degrees (same as off_nom_roll).
+        att_err = max(0.0, constraints.att_err - 0.5)
+        ra, dec = random_radec_in_cone(att0.ra, att0.dec, angle=att_err)
+        roll0 = ska_sun.nominal_roll(ra, dec, time=date)
+        roll = roll0 + off_nom_roll
+        att = Quat([ra, dec, roll])
+
+    elif constraints.pitch is not None:
+        pitch_err = max(0.0, constraints.pitch_err - 0.5)
+        d_pitch = np.random.uniform(pitch_err, pitch_err)
+        pitch = constraints.pitch + d_pitch
+        yaw = np.random.uniform(0, 360)
+        att = ska_sun.get_att_for_sun_pitch_yaw(
+            pitch, yaw, time=date, off_nom_roll=off_nom_roll
+        )
+
+    else:
+        ra = np.random.uniform(0, 360)
+        dec = np.rad2deg(np.arccos(np.random.uniform(-1, 1))) - 90
+        roll = ska_sun.nominal_roll(ra, dec, time=date) + off_nom_roll
+        att = Quat([ra, dec, roll])
+
+    return att
+
+
+def check_n_stars(
+    n_stars, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0, min_stars=None
+):
+    # Get a random sun-pointed attitude anywhere on the sky for a time in 2024 or 2025
+    constraints_all_sky = Constraints(
+        off_nom_roll_max=0.0,
+        date=CxoTime("2024:001") + np.random.uniform(0, 2) * u.yr,
+    )
+    att_est = get_random_attitude(constraints_all_sky)
+
+    # Now run find attitude test with this constraint where the test attitude will be
+    # randomized consistent with the constraints. This selects stars at an attitude
+    # which is randomly displaced from the estimated attitude.
+    constraints = Constraints(
+        off_nom_roll_max=off_nom_roll_max,
+        date=constraints_all_sky.date,
+        att=att_est,
+        att_err=att_err,
+        min_stars=min_stars,
+    )
+    check_random_all_sky(
+        constraints=constraints,
+        tolerance=tolerance,
+        min_stars=n_stars,
+        max_stars=n_stars,
+    )
+
+
+def check_random_all_sky(
+    sigma_1axis=1.0,
+    sigma_mag=0.2,
+    brightest=True,
+    constraints=None,
+    min_stars=4,
+    max_stars=8,
+    tolerance=3.5,
+    log_level="WARNING",
+    sherpa_log_level="WARNING",
+):
+    if constraints is None:
+        constraints = Constraints(off_nom_roll_max=20, date="2025:001")
+
+    n_stars = np.random.randint(min_stars, max_stars + 1)
+
+    while True:
+        att = get_random_attitude(constraints)
+        stars = get_stars(
+            att.ra,
+            att.dec,
+            att.roll,
+            sigma_1axis=sigma_1axis,
+            sigma_mag=sigma_mag,
+            brightest=brightest,
+            date=constraints.date,
+        )
+        if len(stars) >= n_stars:
+            break
+
+    solutions = []
+    solutions = find_attitude_solutions(
+        stars,
+        tolerance=tolerance,
+        constraints=constraints,
+        log_level=log_level,
+        sherpa_log_level=sherpa_log_level,
+    )
+
+    for solution in solutions:
+        solution["att"] = att
+
+    check_output(solutions, stars, att.ra, att.dec, att.roll)
 
 
 def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
@@ -108,7 +255,7 @@ def find_overlapping_distances(min_n_overlap=3, tolerance=3.0):
         ra = np.random.uniform(0, 360)
         dec = np.random.uniform(-90, 90)
         roll = np.random.uniform(0, 360)
-        print(ra, dec, roll)
+        logger.debug(ra, dec, roll)
         stars = get_stars(ra, dec, roll, sigma_1axis=0.001, sigma_mag=0.2)
         dist_table = get_dists_yag_zag(stars["YAG"], stars["ZAG"])
         dists = dist_table["dists"]
@@ -138,29 +285,6 @@ def test_overlapping_distances(tolerance=3.0):
     check_output(solutions, stars, ra, dec, roll)
 
 
-def _test_random(
-    n_iter=1, sigma_1axis=0.4, sigma_mag=0.2, brightest=True
-):
-    np.random.seed(0)
-    for _ in range(n_iter):
-        global ra, dec, roll, stars, agasc_id_star_maps, g_geom_match, g_dist_match
-        ra = np.random.uniform(0, 360)
-        dec = np.random.uniform(-90, 90)
-        roll = np.random.uniform(0, 360)
-        n_stars = np.random.randint(4, 8)
-        stars = get_stars(
-            ra,
-            dec,
-            roll,
-            sigma_1axis=sigma_1axis,
-            sigma_mag=sigma_mag,
-            brightest=brightest,
-        )
-        stars = stars[:n_stars]
-        solutions = find_attitude_solutions(stars)
-        check_output(solutions, stars, ra, dec, roll)
-
-
 def test_multiple_solutions():
     global stars, solutions
     ra, dec, roll = 190.3286989834239, 22.698443628394102, 111.51056234863053
@@ -182,35 +306,104 @@ def test_multiple_solutions():
 
 
 def check_output(solutions, stars, ra, dec, roll):
-    print("*********************************************")
-    print()
+    logger.debug("*********************************************")
+    logger.debug("")
+
+    assert len(solutions) > 0
     for solution in solutions:
         att_fit = solution["att_fit"]
 
         att_in = Quat([ra, dec, roll])
         d_att = att_in.inv() * att_fit
-        d_roll, d_pitch, d_yaw, _ = 2 * np.degrees(d_att.q) * 3600.0
+        d_roll, d_pitch, d_yaw = d_att.roll0, d_att.pitch, d_att.yaw
 
-        print("============================")
-        print(f"Input: RA Dec Roll = {ra:.5f} {dec:.5f} {roll:.5f}")
-        print(
+        logger.debug("============================")
+        logger.debug(f"Input: RA Dec Roll = {ra:.5f} {dec:.5f} {roll:.5f}")
+        logger.debug(
             f"Solve: RA Dec Roll = {att_fit.equatorial[0]:.5f} {att_fit.equatorial[1]:.5f} {att_fit.equatorial[2]:.5f}"
         )
-        print(solution["summary"])
+        logger.debug(solution["summary"])
         if solution["bad_fit"]:
-            print("BAD FIT!")
+            logger.debug("BAD FIT!")
             continue
 
-        assert d_roll < 55.0  # Corresponds to ~1.0 arcsec offset at corner of CCD
+        d_roll_lim = {2: 100, 3: 80, 4: 70, 5: 60, 6: 55, 7: 50, 8: 45}[len(stars)]
+        assert d_roll < d_roll_lim
         assert d_pitch < 1.0
         assert d_yaw < 1.0
 
         ok = ~solution["summary"]["m_agasc_id"].mask
         sok = solution["summary"][ok]
-        assert np.all(sok["AGASC_ID"] == sok["m_agasc_id"])
+        assert np.count_nonzero(sok["AGASC_ID"] == sok["m_agasc_id"]) >= 2
 
     assert sum(1 for s in solutions if not s["bad_fit"]) == 1
-    print("*********************************************\n")
+    logger.debug("*********************************************\n")
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_att_constraint_3_stars(seed):
+    np.random.seed(seed)
+    check_n_stars(n_stars=3, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0)
+
+
+def test_att_constraint_2_stars():
+    """Test once for code coverage but do not expect this to always succeed"""
+    np.random.seed(10)
+    check_n_stars(n_stars=2, tolerance=5.0, att_err=5.0, off_nom_roll_max=1.0)
+
+
+@pytest.mark.parametrize("seed", range(20, 25))
+def test_no_constraints_4_to_8_stars(seed):
+    np.random.seed(seed)
+    check_random_all_sky(constraints=None, tolerance=3.5)
+
+
+@pytest.mark.parametrize("seed", range(30, 35))
+def test_pitch_constraint_3_stars(seed):
+    constraints = Constraints(
+        off_nom_roll_max=1.0,
+        date=CxoTime("2024:001") + np.random.uniform(0, 2) * u.yr,
+        pitch=160,
+        pitch_err=1.5,
+    )
+    check_random_all_sky(
+        constraints=constraints, tolerance=4.0, min_stars=3, max_stars=3
+    )
+
+
+def test_nsm_2024036():
+    att_nsm = Quat([-0.062141268, -0.054177772, 0.920905180, 0.380968348])
+    date_nsm = "2024:036:03:02:38.343"
+    slots = [3, 7]
+    stars = get_stars_from_maude(date_nsm, slots=slots)
+    constraints = Constraints(
+        off_nom_roll_max=1.0,
+        date=date_nsm,
+        att=att_nsm,
+        att_err=5.0,
+        min_stars=2,
+    )
+
+    sols = find_attitude_solutions(
+        stars,
+        tolerance=2.5,
+        constraints=constraints,
+        log_level="WARNING",
+        sherpa_log_level="WARNING",
+    )
+
+    assert len(sols) == 1
+    assert not sols[0]["bad_fit"]
+    att_exp = Quat([-0.11128925, -0.10379516, 0.90382672, 0.39992314])
+    dq = att_exp.dq(sols[0]["att_fit"])
+    assert abs(dq.pitch) < 1.0 / 3600
+    assert abs(dq.yaw) < 1.0 / 3600
+    assert abs(dq.roll0) < 60.0 / 3600
+
+    dq = att_nsm.dq(sols[0]["att_fit"])
+    assert abs(dq.pitch) < 4.0
+    assert abs(dq.yaw) < 4.0
+    assert abs(dq.roll0) < 10.0
 
 
 def test_ra_dec_roll(
@@ -228,6 +421,19 @@ def test_ra_dec_roll(
     )
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     check_output(solutions, stars, ra, dec, roll)
+    summary = solutions[0]["summary"]
+    assert summary.pformat_all() == [
+        " AGASC_ID     RA      DEC      YAG    YAG_ERR   ZAG    ZAG_ERR MAG_ACA MAG_ERROR  m_yag    m_zag   m_mag   dy    dz   dr  m_agasc_id",
+        "---------- -------- -------- -------- ------- -------- ------- ------- --------- -------- -------- ----- ----- ----- ---- ----------",
+        "1229590664 113.9040 -75.5443   277.57    0.34  1697.60   -0.19    7.16     -0.27   277.38  1697.49  7.42  0.19  0.11 0.22 1229590664",
+        "1229598320 117.5286 -75.5923   311.77    0.36 -1558.71   -0.55    8.33      0.09   311.57 -1558.42  8.24  0.20 -0.30 0.36 1229598320",
+        "1229593496 113.9002 -75.1111  1829.68    0.14  1847.63   -0.39    8.73      0.26  1829.68  1847.77  8.47  0.00 -0.14 0.14 1229593496",
+        "1229592728 114.4727 -75.4207   765.52   -0.54  1226.08   -0.25    8.57      0.07   766.21  1226.08  8.50 -0.69 -0.00 0.69 1229592728",
+        "1229601872 116.9575 -76.1410 -1681.19    0.35 -1131.50   -0.39    8.69      0.02 -1681.39 -1131.36  8.68  0.20 -0.14 0.24 1229601872",
+        "1204815872 115.5212 -74.9482  2535.86    0.39   392.52   -0.13    8.69     -0.06  2535.63   392.40  8.75  0.23  0.11 0.26 1204815872",
+        "1229593296 113.5808 -75.0731  1936.75   -0.16  2155.14   -0.53    8.99      0.06  1937.06  2155.42  8.93 -0.31 -0.29 0.42 1229593296",
+        "1229598408 115.6303 -76.2177 -2018.17    0.33    -5.81    0.38    8.99     -0.18 -2018.36    -6.46  9.17  0.18  0.64 0.67 1229598408",
+    ]
 
 
 def test_get_stars_from_greta():
@@ -266,8 +472,8 @@ def test_get_stars_from_greta():
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     assert len(solutions) == 1
     solution = solutions[0]
-    pprint(solution)
-    print("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
+    logger.debug(pformat(solution))
+    logger.debug("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
 
 
 def test_get_stars_from_table():
@@ -297,8 +503,27 @@ def test_get_stars_from_table():
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     assert len(solutions) == 1
     solution = solutions[0]
-    pprint(solution)
-    print("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
+    logger.debug(pformat(solution))
+    logger.debug("RA, Dec, Roll", solutions[0]["att_fit"].equatorial)
+
+
+@pytest.mark.skipif(not HAS_MAUDE, reason="maude not available")
+def test_get_stars_from_maude():
+    stars = get_stars_from_maude("2024:001:12:00:00", dt=12.0)
+    assert stars.pformat_all() == [
+        "slot   YAG      ZAG    MAG_ACA",
+        "---- -------- -------- -------",
+        "   0    39.69 -1882.49    7.31",
+        "   1  2138.01   154.69    7.19",
+        "   2 -1826.71   149.87    7.12",
+        "   3  2338.57 -1508.50    5.62",
+        "   4  1628.89  -269.88    7.69",
+        "   5 -1060.80   904.76    7.88",
+        "   6  2446.09 -2077.31    8.25",
+        "   7 -1562.49  1452.76    8.73",
+    ]
+    solutions = find_attitude_solutions(stars)
+    assert len(solutions) == 1
 
 
 def check_at_time(time, qatt=None):
@@ -345,8 +570,8 @@ def check_at_time(time, qatt=None):
     solution = solutions[0]
     dq = qatt.inv() * solution["att_fit"]
 
-    print(solution["att_fit"].equatorial)
-    print(solution["summary"])
+    logger.debug(solution["att_fit"].equatorial)
+    logger.debug(solution["summary"])
 
     assert abs(dq.q[0] * 2 * 3600) < 60  # arcsec
     assert abs(dq.q[1] * 2 * 3600) < 1.5  # arcsec

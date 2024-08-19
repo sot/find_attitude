@@ -6,14 +6,33 @@ import os
 from itertools import product
 from pathlib import Path
 
+# Squelch the useless warning below prior to import. Since this application
+# does not dealing with image data we don't worry about silencing these.
+# WARNING: imaging routines will not be available,
+# failed to import sherpa.image.ds9_backend due to
+# 'RuntimeErr: DS9Win unusable: Could not find ds9 on your PATH'
+logging.getLogger("sherpa.image").setLevel(logging.ERROR)
+
+import agasc
+import astropy.units as u
+import astropy_healpix
 import networkx as nx
 import numpy as np
+import sherpa.ui
 import tables
 from astropy.io import ascii
 from astropy.table import Column, MaskedColumn, Table, vstack
+from chandra_aca.transform import eci_to_radec, radec_to_yagzag
+from cxotime import CxoTimeLike
+from Quaternion import Quat
 from ska_helpers.logging import basic_logger
+from ska_helpers.utils import set_log_level
 
-DELTA_MAG = 1.5  # Accept matches where candidate star is within DELTA_MAG of observed
+from find_attitude.constraints import Constraints
+
+# Default faint mag threshold for filtering candidate star pairs. Only applies if no
+# constraints are provided.
+DELTA_MAG_DEFAULT = 1.5
 
 # Get the pre-made list of distances between AGASC stars.  If AGASC_PAIRS_FILE env var
 # is defined then use that (for test/development).
@@ -133,6 +152,75 @@ def get_stars_from_text(text):
     return stars[ok]
 
 
+def get_stars_from_maude(
+    date: CxoTimeLike = None, dt: float = 11.0, slots: list | None = None
+):
+    """Get star data from MAUDE for a given date.
+
+    This gets ``dt`` seconds of star data ending at ``date``. If ``date`` is None then
+    get the most recent star data. The star data are AOACYAN, AOACZAN, and AOACMAG for
+    each of the 8 slots.
+
+    Parameters
+    ----------
+    date : CxoTimeLike
+        Date for which to get star data
+    dt : float
+        Time interval (seconds) for which to get star data (default=11.0)
+    slots : list of int, optional
+        List of slots to get star data for (default is all 8 slots)
+
+    Returns
+    -------
+    Table
+        Table of star data for tracked stars in the 8 slots. Columns are 'slot', 'YAG',
+        'ZAG', and 'MAG_ACA'.
+    """
+    import maude
+    from cxotime import CxoTime
+
+    if slots is None:
+        slots = list(range(8))
+
+    msids = []
+    msids.extend([f"aoacyan{ii}" for ii in slots])
+    msids.extend([f"aoaczan{ii}" for ii in slots])
+    msids.extend([f"aoacmag{ii}" for ii in slots])
+    stop = CxoTime(date)
+    start = stop - dt * u.s
+    dat = maude.get_msids(msids, start=start, stop=stop)
+    results = dat["data"]
+    out = {}
+    for result in results:
+        msid = result["msid"]
+        values = result["values"]
+        if len(values) == 0:
+            # Missing data, this should no happen but just in case
+            value = 9999.0
+        elif len(values) < 6:
+            value = np.median(values)
+        else:
+            # Throw out the top and bottom 2 values and take the mean of the middle
+            values = np.sort(values)
+            value = np.mean(values[2:-2])
+        out[msid] = value
+    tbl = Table()
+
+    tbl["slot"] = slots
+    tbl["YAG"] = [out[f"AOACYAN{ii}"] for ii in slots]
+    tbl["ZAG"] = [out[f"AOACZAN{ii}"] for ii in slots]
+    tbl["MAG_ACA"] = [out[f"AOACMAG{ii}"] for ii in slots]
+    tbl.meta["date"] = stop - dt * u.s / 2
+
+    # Filter non-tracking slots which have YAG, ZAG = 3276.8
+    ok = (tbl["YAG"] < 3200) & (tbl["ZAG"] < 3200)
+    tbl = tbl[ok]
+    for name in ["YAG", "ZAG", "MAG_ACA"]:
+        tbl[name].format = ".2f"
+
+    return tbl
+
+
 def get_dists_yag_zag(yags, zags, mags=None):
     """Get distances between every pair of stars with coordinates ``yags`` and ``zags``.
 
@@ -162,7 +250,7 @@ def get_dists_yag_zag(yags, zags, mags=None):
     dists = np.sqrt((yags[idx0] - yags[idx1]) ** 2 + (zags[idx0] - zags[idx1]) ** 2)
     dists = np.array(dists)
     if mags is None:
-        mags = np.ones_like(dists) * 15
+        mags = np.ones_like(yags) * 15
 
     return Table(
         [dists, idx0, idx1, mags[idx0], mags[idx1]],
@@ -237,7 +325,7 @@ def add_edge(graph, id0, id1, i0, i1, dist):
         edge["i1"].append(i1)
 
 
-def connected_agasc_ids(ap):
+def connected_agasc_ids(ap, min_stars):
     """Return agacs_ids that occur at least 4 times.
 
     Each occurrence indicates an edge containing that agasc_id node.
@@ -248,13 +336,18 @@ def connected_agasc_ids(ap):
     agasc_ids = np.concatenate((ap["agasc_id0"], ap["agasc_id1"]))
     c = Column(agasc_ids)
     cg = c.group_by(c)
-    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= 3)
+    i_big_enough = np.flatnonzero(np.diff(cg.groups.indices) >= min_stars - 1)
     out = set(cg.groups.keys[i_big_enough].tolist())
 
     return out
 
 
-def get_match_graph(aca_pairs, agasc_pairs, tolerance):
+def get_match_graph(
+    aca_pairs: Table,
+    agasc_pairs: tables.table.Table,
+    tolerance: float,
+    constraints: Constraints | None = None,
+) -> nx.Graph:
     """Return network graph of all AGASC pairs that correspond to an ACA pair.
 
     Given a table of ``aca_pairs`` representing the distance between every pair in the
@@ -263,49 +356,32 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
 
     From this initial graph select only nodes that have at least 3 connected edges.
 
-    :param aca_pairs: Table of pairwise distances for observed ACA star data
-    :param agasc_pairs: Table of pairwise distances for AGASC catalog stars
-    :param tolerance: matching distance (arcsec)
+    Parameters
+    ----------
+    aca_pairs : Table
+        Table of pairwise distances for observed ACA star data
+    agasc_pairs : tables.table.Table
+        Table of pairwise distances for AGASC catalog stars from opened h5 object
+    tolerance : float
+        Matching distance (arcsec)
+    constraints : Constraints object or None
+        Attitude, normal sun, and date constraints if available
 
-    :returns: networkx graph of distance-match pairs
+    Returns
+    -------
+    nx.Graph
+        Networkx graph of distance-match pairs
     """
-    idx0s = aca_pairs["idx0"]
-    idx1s = aca_pairs["idx1"]
-    dists = aca_pairs["dists"]
-    mag0s = aca_pairs["mag0"]
-    mag1s = aca_pairs["mag1"]
+
+    min_stars = get_min_stars(constraints)
 
     logger.info("Starting get_match_graph")
     gmatch = nx.Graph()
-    ap_list = []
 
-    logger.info("Getting matches from file")
-    for i0, i1, dist, mag0, mag1 in zip(idx0s, idx1s, dists, mag0s, mag1s):
-        logger.debug("Getting matches from file {} {} {}".format(i0, i1, dist))
-        ap = agasc_pairs.read_where(
-            "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
-        )
+    ap = get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints)
 
-        # Filter AGASC pairs based on star pairs magnitudes
-        if DELTA_MAG is not None:
-            max_mag = max(mag0, mag1) + DELTA_MAG
-            mag_ok = (ap["mag0"] / 1000.0 < max_mag) & (ap["mag1"] / 1000.0 < max_mag)
-            ap = ap[mag_ok]
-
-        ones = np.ones(len(ap), dtype=np.uint8)
-        ap = Table(
-            [ap["dists"], ap["agasc_id0"], ap["agasc_id1"], i0 * ones, i1 * ones],
-            names=["dists", "agasc_id0", "agasc_id1", "i0", "i1"],
-        )
-        ap_list.append(ap)
-        logger.debug("  Found {} matching pairs".format(len(ap)))
-
-    ap = vstack(
-        ap_list
-    )  # Vertically stack the individual AGASC pairs tables into one big table
-    connected_ids = connected_agasc_ids(
-        ap
-    )  # Find nodes with at least three connections
+    # Find nodes with at least (min_stars - 1) connections
+    connected_ids = connected_agasc_ids(ap, min_stars)
 
     agasc_id0 = ap["agasc_id0"]
     agasc_id1 = ap["agasc_id1"]
@@ -326,7 +402,99 @@ def get_match_graph(aca_pairs, agasc_pairs, tolerance):
     return gmatch
 
 
-def get_slot_id_candidates(graph, nodes):
+def get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints) -> Table:
+    """
+    Get AGASC pairs that match ACA pair distances.
+
+    Output table has columns 'dists', 'agasc_id0', 'agasc_id1', 'i0', 'i1'.
+
+    Parameters
+    ----------
+    aca_pairs : Table
+        Table of pairwise distances for observed ACA star data
+    agasc_pairs : tables.table.Table
+        Table of pairwise distances for AGASC catalog stars from opened h5 object
+    tolerance : float
+        Matching distance (arcsec)
+    constraints : Constraints object or None
+        Attitude, normal sun, and date constraints if available
+
+    Returns
+    -------
+    Table
+        Table of AGASC pairs that match ACA pair distances
+    """
+    idx0s = aca_pairs["idx0"]
+    idx1s = aca_pairs["idx1"]
+    dists = aca_pairs["dists"]
+    mag0s = aca_pairs["mag0"]
+    mag1s = aca_pairs["mag1"]
+
+    logger.info("Getting matches from file")
+    ap_list = []
+    delta_mag = DELTA_MAG_DEFAULT if constraints is None else constraints.mag_err
+
+    for i0, i1, dist, mag0, mag1 in zip(idx0s, idx1s, dists, mag0s, mag1s):
+        logger.debug("Getting matches from file {} {} {}".format(i0, i1, dist))
+        ap = agasc_pairs.read_where(
+            "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
+        )
+        if constraints is not None and constraints.healpix_indices is not None:
+            ok = np.in1d(ap["pix0"], constraints.healpix_indices) | np.in1d(
+                ap["pix1"], constraints.healpix_indices
+            )
+            ap = ap[ok]
+
+        # Filter AGASC pairs based on star pairs magnitudes
+        if delta_mag is not None:
+            max_mag = max(mag0, mag1) + delta_mag
+            mag_ok = (ap["mag0"] / 1000.0 < max_mag) & (ap["mag1"] / 1000.0 < max_mag)
+            ap = ap[mag_ok]
+
+        ones = np.ones(len(ap), dtype=np.uint8)
+        ap = Table(
+            [ap["dists"], ap["agasc_id0"], ap["agasc_id1"], i0 * ones, i1 * ones],
+            names=["dists", "agasc_id0", "agasc_id1", "i0", "i1"],
+        )
+        ap_list.append(ap)
+        logger.debug("  Found {} matching pairs".format(len(ap)))
+
+    # Vertically stack the individual AGASC pairs tables into one big table
+    ap = vstack(ap_list)
+    return ap
+
+
+def get_min_stars(constraints):
+    """Minimum number of stars required for an attitude solution.
+
+    This is somewhat arbitrary, but the number of healpix indices corresponds to sky
+    area and is a decent proxy for the number of stars that will be found in the
+    matching process.
+
+    Parameters
+    ----------
+    constraints : Constraints object or None
+        Attitude, normal sun, and date constraints if available
+    """
+    if constraints and constraints.min_stars is not None:
+        return constraints.min_stars
+
+    nside = get_agasc_pairs_attribute("healpix_nside")
+    npix = astropy_healpix.nside_to_npix(nside)
+
+    if constraints is None or constraints.healpix_indices is None:
+        # No constraints or constraints do not restrict the healpix indices
+        min_stars = 4
+    elif len(constraints.healpix_indices) < npix / 10:
+        # Typically for a pitch annulus in normal sun mode or estimated attitude
+        min_stars = 3
+    else:
+        min_stars = 4
+
+    return min_stars
+
+
+def get_slot_id_candidates(graph, nodes) -> list[dict[int, int]]:
     """Get list of candidates which map node AGASC ID to ACA star catalog index number.
 
     For a ``graph`` of nodes / edges that match the stars in distance, and a list of
@@ -339,6 +507,11 @@ def get_slot_id_candidates(graph, nodes):
     comments.  It basically tries all permutations of star catalog index number and sees
     which ones end up as a complete graph (though it does this just by counting instead of
     making graphs).
+
+    Output is a list of dictionaries where the keys are AGASC IDs and the values are
+    indices into the ACA star table. For example::
+
+      [{876482752: 5, 876610304: 3, 876481760: 4, 876486456: 7, 876610432: 6}]
 
     :param graph: graph of distance-match pairs
     :param nodes: list of nodes that form a complete subgraph
@@ -389,7 +562,9 @@ def get_slot_id_candidates(graph, nodes):
     return id_candidates
 
 
-def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, tolerance=2.5):
+def find_matching_agasc_ids(
+    aca_pairs, agasc_pairs_file, g_dist_match=None, tolerance=2.5, constraints=None
+) -> list[dict[int, int]]:
     """Given an input table of ``stars`` find the matching cliques.
 
     These cliques are completely connected subgraphs in the ``agasc_pairs_file`` of pair
@@ -402,19 +577,75 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
     If ``g_dist_match`` is supplied then skip over reading the AGASC pairs and doing
     initial matching.  This is mostly for development.
 
-    :param stars: table of up to 8 stars
+    Output is a list of dictionaries where the keys are AGASC IDs and the values are
+    indices into the input star table. For example::
+
+      [{876482752: 5, 876610304: 3, 876481760: 4, 876486456: 7, 876610432: 6}]
+
+    :param aca_pairs: table of distances between every star pair
     :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py
     :param g_dist_match: graph with matching distances (optional, for development)
     :param tolerance: distance matching tolerance (arcsec)
+    :param constraints: Constraints object or None
+        Attitude, normal sun, and date constraints if available
 
     :returns: list of possible AGASC-ID to star index maps
     """
+    # Zero ACA pairs => 0 stars, 1 pair => 2 stars, > 2 pairs => at least 3 stars
+    if len(aca_pairs) < 1:
+        raise ValueError("need at least 2 stars to match")
+    elif len(aca_pairs) == 1:
+        func = _find_matching_agasc_ids_two_stars
+    else:
+        func = _find_matching_agasc_ids_three_or_more_stars
+
+    out = func(aca_pairs, agasc_pairs_file, g_dist_match, tolerance, constraints)
+    logger.info(f"Found {len(out)} possible AGASC-ID to star index maps")
+    return out
+
+
+def _find_matching_agasc_ids_two_stars(
+    aca_pairs, agasc_pairs_file, g_dist_match=None, tolerance=2.5, constraints=None
+):
+    """Helper function for find_matching_agasc_ids() for two stars.
+
+    Since for two stars there is no need to find cliques, this function is a bit
+    simpler.  It just finds all the pairs of AGASC stars that match the ACA pairs.
+    There is a 180 degree ambiguity in the ACA star catalog, so for each pair of ACA
+    stars there are two possible AGASC pairs.
+
+    See that function for details.
+    """
+    if g_dist_match is not None:
+        raise ValueError("g_dist_match must be None for two star matching")
+
+    logger.info(f"Opening AGASC pairs file {agasc_pairs_file}")
+    with tables.open_file(agasc_pairs_file, "r") as h5:
+        agasc_pairs = h5.root.data
+        ap = get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints)
+
+    out = []
+    for row in ap:
+        out.append({row["agasc_id0"]: row["i0"], row["agasc_id1"]: row["i1"]})
+        out.append({row["agasc_id0"]: row["i1"], row["agasc_id1"]: row["i0"]})
+
+    return out
+
+
+def _find_matching_agasc_ids_three_or_more_stars(
+    aca_pairs, agasc_pairs_file, g_dist_match=None, tolerance=2.5, constraints=None
+):
+    """Helper function for find_matching_agasc_ids() for three or more stars.
+
+    See that function for details.
+    """
     if g_dist_match is None:
         logger.info("Using AGASC pairs file {}".format(agasc_pairs_file))
-        h5 = tables.open_file(agasc_pairs_file, "r")
-        agasc_pairs = h5.root.data
-        g_dist_match = get_match_graph(stars, agasc_pairs, tolerance)
-        h5.close()
+        with tables.open_file(agasc_pairs_file, "r") as h5:
+            agasc_pairs = h5.root.data
+            g_dist_match = get_match_graph(
+                aca_pairs, agasc_pairs, tolerance, constraints
+            )
 
     logger.info("Getting all triangles from match graph")
     match_tris = get_triangles(g_dist_match)
@@ -447,22 +678,34 @@ def find_matching_agasc_ids(stars, agasc_pairs_file, g_dist_match=None, toleranc
     out = []
 
     # Iterate through complete subgraphs (cliques) and require at least
-    # four nodes.
+    # min_stars nodes.
+    min_nodes = get_min_stars(constraints)
     for clique_nodes in nx.find_cliques(g_geom_match):
         n_clique_nodes = len(clique_nodes)
-        if n_clique_nodes < 4:
+        if n_clique_nodes < min_nodes:
             continue
 
         logger.info("Checking clique {}".format(clique_nodes))
-
         out.extend(get_slot_id_candidates(g_geom_match, clique_nodes))
 
     logger.info("Done with graph matching")
+
+    if len(out) > 0:
+        # Only accept solutions with the maximum number of nodes.
+        max_clique_nodes = max(len(c) for c in out)
+        out = [c for c in out if len(c) == max_clique_nodes]
+
     return out
 
 
 def find_all_matching_agasc_ids(
-    yags, zags, mags=None, agasc_pairs_file=None, dist_match_graph=None, tolerance=2.5
+    yags,
+    zags,
+    mags=None,
+    agasc_pairs_file=None,
+    dist_match_graph=None,
+    tolerance=2.5,
+    constraints=None,
 ):
     """Given an input table of ``stars`` find the matching cliques.
 
@@ -476,17 +719,23 @@ def find_all_matching_agasc_ids(
     :param agasc_pairs_file: name of AGASC pairs file created with make_distances.py
     :param dist_match_graph: graph with matching distances (optional, for development)
     :param tolerance: distance matching tolerance (arcsec)
+    :param constraints: Constraints object or None
+        Attitude, normal sun, and date constraints if available
 
     :returns: list of possible AGASC-ID to star index maps
     """
-    stars = get_dists_yag_zag(yags, zags, mags)
+    aca_pairs = get_dists_yag_zag(yags, zags, mags)
     agasc_id_star_maps = find_matching_agasc_ids(
-        stars, agasc_pairs_file, dist_match_graph, tolerance=tolerance
+        aca_pairs,
+        agasc_pairs_file,
+        dist_match_graph,
+        tolerance=tolerance,
+        constraints=constraints,
     )
     return agasc_id_star_maps
 
 
-def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
+def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map, constraints=None):
     """Find the fine attitude for the given inputs.
 
     Find the fine attitude for a given set of yags and zags and a map of AGASC ID
@@ -502,37 +751,26 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
       statval : final fit statistic
       agasc_id_star_map : input AGASC ID to star index map
 
+    :param yags: np.array with star Y angles in arcsec
+    :param zags: np.array with star Z angles in arcsec
+    :param agasc_id_star_map: dict of AGASC ID to star index map
+    :param constraints: Constraints object or None
+        Attitude, normal sun, and date constraints if available
+
     :returns: dict
 
     """
     # Sherpa model global, leave this alone.
     global yagzag  # noqa: PLW0602
 
-    # Squelch the useless warning below prior to import. Since this application
-    # does not dealing with image data we don't worry about silencing these.
-    # WARNING: imaging routines will not be available,
-    # failed to import sherpa.image.ds9_backend due to
-    # 'RuntimeErr: DS9Win unusable: Could not find ds9 on your PATH'
-    logging.getLogger("sherpa.image").setLevel(logging.ERROR)
-
-    import agasc
-    from Quaternion import Quat
-    from sherpa import ui
-    from Ska.quatutil import radec2yagzag
-
-    # Set sherpa logger to same level as local logger
-    sherpa_logger = logging.getLogger("sherpa")
-    # FIXME: this looks like a bug in the original code. Either get rid of the loop or
-    # set levels for all handlers along with the sherpa_logger.
-    for _hdlr in sherpa_logger.handlers:
-        sherpa_logger.setLevel(logger.level)
-
+    logger.info(f"Finding attitude for {agasc_id_star_map} stars")
     star_indices = list(agasc_id_star_map.values())
     yags = yags[star_indices]
     zags = zags[star_indices]
 
+    date = constraints.date if constraints else None
     agasc_ids = list(agasc_id_star_map.keys())
-    agasc_stars = [agasc.get_star(agasc_id) for agasc_id in agasc_ids]
+    agasc_stars = [agasc.get_star(agasc_id, date=date) for agasc_id in agasc_ids]
 
     ras = [s["RA_PMCORR"] for s in agasc_stars]
     decs = [s["DEC_PMCORR"] for s in agasc_stars]
@@ -541,8 +779,8 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
 
     def _yag_zag(dra, ddec, droll):
         q = qatt * Quat([dra / 3600.0, ddec / 3600.0, droll])
-        yags, zags = radec2yagzag(ras, decs, q)
-        return yags * 3600, zags * 3600, q
+        yags, zags = radec_to_yagzag(ras, decs, q)
+        return yags, zags, q
 
     def yag_zag(pars, x):  # noqa: ARG001
         m_yags, m_zags, q = _yag_zag(*pars)
@@ -562,6 +800,7 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     roll = np.degrees(m_ang - s_ang)
 
     y = np.concatenate([yags, zags])
+    ui = sherpa.ui
     ui.load_arrays(1, np.arange(len(y)), y, np.ones(len(y)))
     ui.load_user_model(yag_zag, "yagzag")
     ui.add_user_pars("yagzag", ["dra", "ddec", "droll"])
@@ -575,8 +814,11 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
     ui.freeze(yagzag.droll)
     ui.fit()
 
-    ui.thaw(yagzag.droll)
-    ui.fit()
+    # Only need to fit roll for more than 2 stars. With 2 stars, original roll is exact.
+    if len(agasc_stars) > 2:
+        ui.thaw(yagzag.droll)
+        ui.fit()
+
     fit_results = ui.get_fit_results()
     m_yags, m_zags, att_fit = _yag_zag(
         yagzag.dra.val, yagzag.ddec.val, yagzag.droll.val
@@ -591,16 +833,27 @@ def find_attitude_for_agasc_ids(yags, zags, agasc_id_star_map):
         "statval": fit_results.statval,
         "agasc_id_star_map": agasc_id_star_map,
     }
+    logger.info(f"Found attitude {att_fit} with statval {fit_results.statval}")
 
     return out
 
 
-def find_attitude_solutions(stars, tolerance=2.5):
+def find_attitude_solutions(
+    stars,
+    tolerance=2.5,
+    constraints=None,
+    log_level=None,
+    sherpa_log_level="WARNING",
+):
     """
     Find attitude solutions given an input table of star data.
 
     The input star table must have columns 'YAG' (arcsec), 'ZAG' (arcsec), and
     'MAG'.  There must be at least four stars for the matching algorithm to succeed.
+
+    This relies on a pre-computed star pair distance file that is created with
+    ``make_distances.py``.  This file is an HDF5 file with a table of pair distances
+    that is computed for a particular star epoch.
 
     The output is a list of solutions, where each solution is a dict with keys::
 
@@ -616,14 +869,30 @@ def find_attitude_solutions(stars, tolerance=2.5):
 
     :param stars: table of star data
     :param tolerance: matching tolerance (arcsec, default=2.5)
+    :param constraints: Constraints object or None
+        Attitude, normal sun, and date constraints if available
+    :param log_level: logging level for find_attidue functions
+    :param sherpa_log_level: logging level for sherpa
 
     :returns: list of solutions, where each solution is a dict
     """
-    if len(stars) < 4:
+    with (
+        set_log_level(logger, log_level),
+        set_log_level(logging.getLogger("sherpa"), sherpa_log_level),
+    ):
+        return _find_attitude_solutions(stars, tolerance, constraints)
+
+
+def _find_attitude_solutions(
+    stars,
+    tolerance=2.5,
+    constraints=None,
+):
+    min_stars = get_min_stars(constraints)
+    if len(stars) < min_stars:
         raise ValueError(
-            "need at least 4 stars for matching, only {} were provided".format(
-                len(stars)
-            )
+            f"need at least {min_stars} stars for matching,"
+            f" only {len(stars)} were provided"
         )
 
     agasc_id_star_maps = find_all_matching_agasc_ids(
@@ -632,13 +901,17 @@ def find_attitude_solutions(stars, tolerance=2.5):
         stars["MAG_ACA"],
         agasc_pairs_file=AGASC_PAIRS_FILE,
         tolerance=tolerance,
+        constraints=constraints,
     )
 
     solutions = []
     for agasc_id_star_map in agasc_id_star_maps:
         solution = find_attitude_for_agasc_ids(
-            stars["YAG"], stars["ZAG"], agasc_id_star_map
+            stars["YAG"], stars["ZAG"], agasc_id_star_map, constraints
         )
+
+        if constraints and not constraints.check_off_nom_roll(solution["att_fit"]):
+            continue
 
         # Check to see if there is another solution that has overlapping
         # stars.  If there are overlaps and this solution has a lower
@@ -648,21 +921,30 @@ def find_attitude_solutions(stars, tolerance=2.5):
         for prev_solution in solutions:
             if agasc_ids.intersection(prev_solution["agasc_ids"]):
                 if solution["statval"] < prev_solution["statval"]:
+                    logger.info(
+                        f"Updating solution for {prev_solution['agasc_ids']} with "
+                        f"{agasc_ids} for better statval {solution['statval']}"
+                    )
                     prev_solution.update(solution)
+                else:
+                    logger.info(f"Skipping solution for {agasc_ids} (worse statval)")
                 break
         else:
+            logger.info(
+                f"Adding solution for {agasc_ids} with statval {solution['statval']}"
+            )
             solutions.append(solution)
 
-    _update_solutions(solutions, stars)
+    _update_solutions(solutions, stars, min_stars)
     return solutions
 
 
-def _update_solutions(solutions, stars):
+def _update_solutions(solutions, stars, min_stars):
     for sol in solutions:
         summ = Table(stars, masked=True)
 
         indices = list(sol["agasc_id_star_map"].values())
-        for name in ("m_yag", "dy", "m_zag", "dz", "dr"):
+        for name in ("m_yag", "m_zag", "m_mag", "dy", "dz", "dr"):
             summ[name] = MaskedColumn([-99.0] * len(summ), name=name, mask=True)
         summ["m_agasc_id"] = MaskedColumn(
             [-99] * len(summ), name="m_agasc_id", mask=True
@@ -676,14 +958,18 @@ def _update_solutions(solutions, stars):
             (sol["yags"] - sol["m_yags"]) ** 2 + (sol["zags"] - sol["m_zags"]) ** 2
         )
         summ["dr"][indices] = dr
-        summ["m_agasc_id"][indices] = list(sol["agasc_id_star_map"].keys())
+        m_agasc_ids = list(sol["agasc_id_star_map"].keys())
+        summ["m_agasc_id"][indices] = m_agasc_ids
+
+        stars = agasc.get_stars(m_agasc_ids)
+        summ["m_mag"][indices] = [star["MAG_ACA"] for star in stars]
 
         for name in summ.colnames:
             if name in ("RA", "DEC"):
                 format = "{:.4f}"
             elif "agasc" in name.lower():
                 format = "{:d}"
-            elif name in ("m_yag", "dy", "m_zag", "dz", "dr"):
+            elif name in ("m_yag", "m_zag", "m_mag", "dy", "dz", "dr"):
                 format = "{:.2f}"
             elif name in ("YAG", "YAG_ERR", "ZAG", "ZAG_ERR", "MAG_ACA", "MAG_ERROR"):
                 format = "{:.2f}"
@@ -693,5 +979,55 @@ def _update_solutions(solutions, stars):
                 summ[name].format = format
         sol["summary"] = summ
 
-        # Need at least 4 stars with radial fit residual < 3 arcsec
-        sol["bad_fit"] = np.sum(dr < 3.0) < 4
+        # Need at least min_stars stars with radial fit residual < 5.0 arcsec
+        sol["bad_fit"] = np.sum(dr < 5.0) < min_stars
+
+
+def get_healpix_indices_within_annulus(
+    ra: float,
+    dec: float,
+    *,
+    radius0: float,
+    radius1: float,
+    nside: int = 64,
+    order: str = "nested",
+):
+    """Get healpix indices within a range of radii from a given RA, Dec.
+
+    This is a much faster, somewhat approximate version of the astropy_healpix method
+    cone_search_lonlat(). It works by computing the positions of the four corners of
+    each pixels and checking if that is within the annulus. This requires that
+    ``radius0`` and ``radius1`` are both much bigger than the healpix pixel size.
+
+    Parameters
+    ----------
+    ra : float
+        Right ascension in degrees
+    dec : float
+        Declination in degrees
+    radius0 : float
+        Inner radius in degrees
+    radius1 : float
+        Outer radius in degrees
+    nside : int
+        Healpix nside parameter (default=64)
+    order : str
+        Healpix order parameter (default='nested')
+
+    Returns
+    -------
+    healpix_indices : ndarray
+        List of healpix indices
+    """
+    npix = astropy_healpix.nside_to_npix(nside)
+
+    ok = np.zeros(npix, dtype=bool)
+    for dx, dy in zip([0.0, 0.0, 1.0, 1.0], [0.0, 1.0, 0.0, 1.0]):
+        x, y, z = astropy_healpix.healpix_to_xyz(
+            np.arange(npix), dx=dx, dy=dy, nside=64, order=order
+        )
+        ras, decs = eci_to_radec(np.array([x, y, z]).T)
+        distances = agasc.sphere_dist(ra, dec, ras, decs)
+        ok |= (distances >= radius0) & (distances <= radius1)
+
+    return np.where(ok)[0]
