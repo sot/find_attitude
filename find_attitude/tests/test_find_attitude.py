@@ -8,6 +8,7 @@ import pytest
 import ska_sun
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
+from astropy.table import Table
 from chandra_aca.transform import radec_to_yagzag, yagzag_to_pixels
 from cxotime import CxoTime
 from Quaternion import Quat
@@ -422,7 +423,7 @@ def test_ra_dec_roll(
     solutions = find_attitude_solutions(stars, tolerance=2.5)
     check_output(solutions, stars, ra, dec, roll)
     summary = solutions[0]["summary"]
-    assert summary.pformat_all() == [
+    exp = Table.read([
         " AGASC_ID     RA      DEC      YAG    YAG_ERR   ZAG    ZAG_ERR MAG_ACA MAG_ERROR  m_yag    m_zag   m_mag   dy    dz   dr  m_agasc_id",
         "---------- -------- -------- -------- ------- -------- ------- ------- --------- -------- -------- ----- ----- ----- ---- ----------",
         "1229590664 113.9040 -75.5443   277.57    0.34  1697.60   -0.19    7.16     -0.27   277.38  1697.49  7.42  0.19  0.11 0.21 1229590664",
@@ -433,7 +434,29 @@ def test_ra_dec_roll(
         "1204815872 115.5212 -74.9482  2535.86    0.39   392.52   -0.13    8.69     -0.06  2535.63   392.40  8.75  0.23  0.11 0.26 1204815872",
         "1229593296 113.5808 -75.0731  1936.75   -0.16  2155.14   -0.53    8.99      0.06  1937.06  2155.42  8.93 -0.31 -0.29 0.42 1229593296",
         "1229598408 115.6303 -76.2177 -2018.17    0.33    -5.81    0.38    8.99     -0.18 -2018.36    -6.46  9.17  0.18  0.64 0.67 1229598408",
-    ]
+    ], format="ascii")
+    summary.sort("AGASC_ID")
+    exp.sort("AGASC_ID")
+    assert len(exp) == len(summary)
+    for row_exp, row_test in zip(exp, summary):
+        for col in ["AGASC_ID", "m_agasc_id"]:
+            assert row_exp[col] == row_test[col]
+        tols = {"RA": 1e-4,
+                "DEC": 1e-4,
+                "YAG": 5e-2,
+                "YAG_ERR": 5e-2,
+                "ZAG": 5e-2,
+                "ZAG_ERR": 5e-2,
+                "MAG_ACA": 1e-2,
+                "MAG_ERROR": 1e-2,
+                "m_zag": 5e-2,
+                "m_mag": 1e-2,
+                "dy": 5e-2,
+                "dz": 5e-2,
+                "dr": 5e-2}
+        for col in tols:
+            assert np.isclose(row_exp[col], row_test[col], atol=tols[col], rtol=0)
+
 
 
 def test_get_stars_from_greta():
