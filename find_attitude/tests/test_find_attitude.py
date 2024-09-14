@@ -415,11 +415,15 @@ def test_ra_dec_roll(
     sigma_1axis=0.4,
     sigma_mag=0.2,
 ):
+    """Regression test at a specific attitude and date"""
     global stars, agasc_id_star_maps, g_geom_match, g_dist_match, solutions
     stars = get_stars(
         ra, dec, roll, sigma_1axis=sigma_1axis, sigma_mag=sigma_mag, brightest=brightest
     )
-    solutions = find_attitude_solutions(stars, tolerance=2.5)
+    # Enforce the date constraint and remove the default off_nom_roll constraint.
+    constraints = Constraints(date="2024-08-28", off_nom_roll_max=None)
+
+    solutions = find_attitude_solutions(stars, tolerance=2.5, constraints=constraints)
     check_output(solutions, stars, ra, dec, roll)
     summary = solutions[0]["summary"]
     assert summary.pformat_all() == [
