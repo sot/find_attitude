@@ -426,7 +426,7 @@ def test_ra_dec_roll(
     solutions = find_attitude_solutions(stars, tolerance=2.5, constraints=constraints)
     check_output(solutions, stars, ra, dec, roll)
     summary = solutions[0]["summary"]
-    assert summary.pformat_all() == [
+    assert summary.pformat() == [
         " AGASC_ID     RA      DEC      YAG    YAG_ERR   ZAG    ZAG_ERR MAG_ACA MAG_ERROR  m_yag    m_zag   m_mag   dy    dz   dr  m_agasc_id",
         "---------- -------- -------- -------- ------- -------- ------- ------- --------- -------- -------- ----- ----- ----- ---- ----------",
         "1229590664 113.9040 -75.5443   277.57    0.34  1697.60   -0.19    7.16     -0.27   277.38  1697.49  7.42  0.19  0.11 0.21 1229590664",
@@ -514,7 +514,7 @@ def test_get_stars_from_table():
 @pytest.mark.skipif(not HAS_MAUDE, reason="maude not available")
 def test_get_stars_from_maude():
     stars = get_stars_from_maude("2024:001:12:00:00", dt=12.0)
-    assert stars.pformat_all() == [
+    assert stars.pformat() == [
         "slot   YAG      ZAG    MAG_ACA",
         "---- -------- -------- -------",
         "   0    39.69 -1882.49    7.31",
