@@ -440,7 +440,7 @@ def get_distance_pairs(aca_pairs, agasc_pairs, tolerance, constraints) -> Table:
             "(dists > {}) & (dists < {})".format(dist - tolerance, dist + tolerance)
         )
         if constraints is not None and constraints.healpix_indices is not None:
-            ok = np.in1d(ap["pix0"], constraints.healpix_indices) | np.in1d(
+            ok = np.isin(ap["pix0"], constraints.healpix_indices) | np.isin(
                 ap["pix1"], constraints.healpix_indices
             )
             ap = ap[ok]
