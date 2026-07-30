@@ -13,6 +13,8 @@ from cxotime import CxoTime
 from Quaternion import Quat
 from ska_helpers.utils import random_radec_in_cone
 
+from astropy.table import Table
+
 from find_attitude import (
     Constraints,
     find_attitude_solutions,
@@ -22,6 +24,7 @@ from find_attitude import (
     get_stars_from_text,
     logger,
 )
+from find_attitude.find_attitude import _update_solutions
 
 MAX_MAG = get_agasc_pairs_attribute("max_mag")
 
@@ -599,3 +602,48 @@ def test_at_times():
     )  # Telem aoattqt* are wrong
     for time, qatt in zip(times, qatts):
         check_at_time(time, qatt)
+
+
+def test_update_solutions_summary_columns_consistent():
+    """All solution summaries must have the same columns as the input star table.
+
+    When multiple solutions are returned, each solution's ``summary`` table must be
+    built from the input ACA star table (e.g. columns slot, YAG, ZAG, MAG_ACA) plus
+    the fit residual columns, not from AGASC catalog columns.
+    """
+    input_stars = Table(
+        {
+            "slot": [0, 1, 2, 3],
+            "YAG": [567.4, -3294.3, 1363.5, -1612.8],
+            "ZAG": [1811.0, -1445.8, -2168.3, 1282.0],
+            "MAG_ACA": [6.47, 7.94, 8.89, 9.62],
+        }
+    )
+
+    # Two solutions with non-overlapping AGASC IDs (real stars from test data).
+    # Solution 0 matches input stars at indices 0, 1; solution 1 at indices 2, 3.
+    solution_0 = {
+        "agasc_id_star_map": {260863544: 0, 189804208: 1},
+        "m_yags": np.array([567.4, -3294.3]),
+        "m_zags": np.array([1811.0, -1445.8]),
+        "yags": np.array([567.4, -3294.3]),
+        "zags": np.array([1811.0, -1445.8]),
+    }
+    solution_1 = {
+        "agasc_id_star_map": {260856472: 2, 189811352: 3},
+        "m_yags": np.array([1363.5, -1612.8]),
+        "m_zags": np.array([-2168.3, 1282.0]),
+        "yags": np.array([1363.5, -1612.8]),
+        "zags": np.array([-2168.3, 1282.0]),
+    }
+
+    _update_solutions([solution_0, solution_1], input_stars, min_stars=2)
+
+    expected_cols = set(input_stars.colnames) | {
+        "m_yag", "m_zag", "m_mag", "dy", "dz", "dr", "m_agasc_id"
+    }
+    for i, solution in enumerate([solution_0, solution_1]):
+        assert set(solution["summary"].colnames) == expected_cols, (
+            f"Solution {i} summary columns {solution['summary'].colnames!r} "
+            f"do not match expected {sorted(expected_cols)!r}"
+        )
