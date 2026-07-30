@@ -637,7 +637,13 @@ def test_update_solutions_summary_columns_consistent():
     _update_solutions([solution_0, solution_1], input_stars, min_stars=2)
 
     expected_cols = set(input_stars.colnames) | {
-        "m_yag", "m_zag", "m_mag", "dy", "dz", "dr", "m_agasc_id"
+        "m_yag",
+        "m_zag",
+        "m_mag",
+        "dy",
+        "dz",
+        "dr",
+        "m_agasc_id",
     }
     for i, solution in enumerate([solution_0, solution_1]):
         assert set(solution["summary"].colnames) == expected_cols, (
