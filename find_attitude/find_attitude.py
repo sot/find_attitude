@@ -961,8 +961,8 @@ def _update_solutions(solutions, stars, min_stars):
         m_agasc_ids = list(sol["agasc_id_star_map"].keys())
         summ["m_agasc_id"][indices] = m_agasc_ids
 
-        stars = agasc.get_stars(m_agasc_ids)
-        summ["m_mag"][indices] = [star["MAG_ACA"] for star in stars]
+        agasc_stars = agasc.get_stars(m_agasc_ids)
+        summ["m_mag"][indices] = [star["MAG_ACA"] for star in agasc_stars]
 
         for name in summ.colnames:
             if name in ("RA", "DEC"):
