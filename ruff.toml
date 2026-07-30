@@ -9,9 +9,10 @@ extend-exclude = [
 # incrementally fixing code to adhere to these rules, but for practical purposes they
 # can be ignored by uncommenting each one. You can also add to this list as needed.
 lint.extend-ignore = [
-  "B905", # `zip()` without an explicit `strict=` parameter
+  "B905",    # `zip()` without an explicit `strict=` parameter
+  "PLC0415", # `import` should be at the top of the file
   "PLR0912", # Too many branches
 ]
 
 [lint.extend-per-file-ignores]
-"**/tests/test_*.py" = ["PLW0602", "PLW0603"]
+"**/tests/test_*.py" = ["PLW0602", "PLW0603", "PLR0917"]

@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import os
+import traceback
 from logging import CRITICAL
 
 from django.shortcuts import render
@@ -54,8 +55,6 @@ def find_solutions_and_get_context(request):
     try:
         solutions = find_attitude_solutions(stars, tolerance=tolerance)
     except Exception:
-        import traceback
-
         context["error_message"] = traceback.format_exc()
         return context
 

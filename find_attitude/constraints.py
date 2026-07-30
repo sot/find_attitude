@@ -66,6 +66,7 @@ class Constraints:
         healpix_indices : ndarray | None
             List of healpix indices or None
         """
+        # Deferred to avoid circular import: constraints.py is imported by find_attitude.py
         from find_attitude import (
             get_agasc_pairs_attribute,
             get_healpix_indices_within_annulus,

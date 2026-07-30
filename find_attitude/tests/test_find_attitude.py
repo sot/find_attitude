@@ -8,12 +8,13 @@ import pytest
 import ska_sun
 from astropy.coordinates import SkyCoord
 from astropy.io import ascii
+from astropy.table import Table
+from Chandra.Time import DateTime
 from chandra_aca.transform import radec_to_yagzag, yagzag_to_pixels
 from cxotime import CxoTime
 from Quaternion import Quat
+from Ska.engarchive import fetch
 from ska_helpers.utils import random_radec_in_cone
-
-from astropy.table import Table
 
 from find_attitude import (
     Constraints,
@@ -534,10 +535,6 @@ def test_get_stars_from_maude():
 
 
 def check_at_time(time, qatt=None):
-    from astropy.table import Table
-    from Chandra.Time import DateTime
-    from Ska.engarchive import fetch
-
     msids_all = []
     msids = {}
     typs = ("fid", "yan", "zan", "mag")

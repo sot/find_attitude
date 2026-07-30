@@ -287,7 +287,7 @@ def get_triangles(G):
     return result
 
 
-def add_edge(graph, id0, id1, i0, i1, dist):
+def add_edge(graph, id0, id1, i0, i1, dist):  # noqa: PLR0917
     """Add an edge to the graph including metdata values ``i0``, ``i1`` and ``dist``.
 
     ``id0`` and ``id1`` are the AGASC (and node) ID of the edge that gets inserted.
@@ -698,7 +698,7 @@ def _find_matching_agasc_ids_three_or_more_stars(
     return out
 
 
-def find_all_matching_agasc_ids(
+def find_all_matching_agasc_ids(  # noqa: PLR0917
     yags,
     zags,
     mags=None,
