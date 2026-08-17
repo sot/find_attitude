@@ -4,11 +4,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>find_attitude.find_attitude &#8212; find_attitude 3.6.0 documentation</title>
+    <title>find_attitude.find_attitude &#8212; find_attitude 3.6.1 documentation</title>
     <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
     <link rel="stylesheet" type="text/css" href="../../_static/bootstrap-astropy.css?v=f4f7060c" />
     
-    <script src="../../_static/documentation_options.js?v=5349f462"></script>
+    <script src="../../_static/documentation_options.js?v=f731707b"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script type="text/javascript" src="../../_static/sidebar.js"></script>
@@ -44,7 +44,7 @@
     <h3>Navigation</h3>
     <ul>
       <li>
-	<a href="../../index.html">find_attitude 3.6.0 documentation</a>
+	<a href="../../index.html">find_attitude 3.6.1 documentation</a>
 	 &#187;
       </li>
       <li><a href="../index.html" accesskey="U">Module code</a> &#187;</li>
@@ -363,7 +363,7 @@
 
 <div class="viewcode-block" id="add_edge">
 <a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.add_edge">[docs]</a>
-<span class="k">def</span><span class="w"> </span><span class="nf">add_edge</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">,</span> <span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">dist</span><span class="p">):</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">add_edge</span><span class="p">(</span><span class="n">graph</span><span class="p">,</span> <span class="n">id0</span><span class="p">,</span> <span class="n">id1</span><span class="p">,</span> <span class="n">i0</span><span class="p">,</span> <span class="n">i1</span><span class="p">,</span> <span class="n">dist</span><span class="p">):</span>  <span class="c1"># noqa: PLR0917</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Add an edge to the graph including metdata values ``i0``, ``i1`` and ``dist``.</span>
 
 <span class="sd">    ``id0`` and ``id1`` are the AGASC (and node) ID of the edge that gets inserted.</span>
@@ -795,7 +795,7 @@
 
 <div class="viewcode-block" id="find_all_matching_agasc_ids">
 <a class="viewcode-back" href="../../index.html#find_attitude.find_attitude.find_all_matching_agasc_ids">[docs]</a>
-<span class="k">def</span><span class="w"> </span><span class="nf">find_all_matching_agasc_ids</span><span class="p">(</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">find_all_matching_agasc_ids</span><span class="p">(</span>  <span class="c1"># noqa: PLR0917</span>
     <span class="n">yags</span><span class="p">,</span>
     <span class="n">zags</span><span class="p">,</span>
     <span class="n">mags</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
@@ -1065,8 +1065,8 @@
         <span class="n">m_agasc_ids</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">sol</span><span class="p">[</span><span class="s2">&quot;agasc_id_star_map&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
         <span class="n">summ</span><span class="p">[</span><span class="s2">&quot;m_agasc_id&quot;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="n">m_agasc_ids</span>
 
-        <span class="n">stars</span> <span class="o">=</span> <span class="n">agasc</span><span class="o">.</span><span class="n">get_stars</span><span class="p">(</span><span class="n">m_agasc_ids</span><span class="p">)</span>
-        <span class="n">summ</span><span class="p">[</span><span class="s2">&quot;m_mag&quot;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">star</span><span class="p">[</span><span class="s2">&quot;MAG_ACA&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">star</span> <span class="ow">in</span> <span class="n">stars</span><span class="p">]</span>
+        <span class="n">agasc_stars</span> <span class="o">=</span> <span class="n">agasc</span><span class="o">.</span><span class="n">get_stars</span><span class="p">(</span><span class="n">m_agasc_ids</span><span class="p">)</span>
+        <span class="n">summ</span><span class="p">[</span><span class="s2">&quot;m_mag&quot;</span><span class="p">][</span><span class="n">indices</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">star</span><span class="p">[</span><span class="s2">&quot;MAG_ACA&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">star</span> <span class="ow">in</span> <span class="n">agasc_stars</span><span class="p">]</span>
 
         <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">summ</span><span class="o">.</span><span class="n">colnames</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;RA&quot;</span><span class="p">,</span> <span class="s2">&quot;DEC&quot;</span><span class="p">):</span>
